@@ -19,11 +19,19 @@ if FLOCK_PATH_SET:
 
 # Commands, most unimplemented:
 #   init        - Starts a Git repository with the appropriate structure
+#   set         - Set default values to use in commands
 #   import      - Reads an XML file, writes JSON
 #   export      - Reads or creates JSON, converts to XML
 #   render      - Renders output
-#   addEdges    - Selects edges to add to this flock's index
-#   review      - Plays individual edges; records weights
+#   show        - Displays latest rendering results to user
+#   review      - Displays unreviewed edges, solicits reviews
+#   createEdge  - Make a single edge file from genomes
+#   addEdges    - Selects edges to add to the auto list
+#   serve       - Launches a distribution server for multi-card rendering
+#   host        - Connect to a server and perform its renders
+#   encode      - Go from one format to another
+#
+# init will be implemented separately so users don't have to clone twice
 
 class Flockutil(object):
     def __init__(self, args):
@@ -32,30 +40,41 @@ class Flockutil(object):
         getattr(self, 'cmd_' + args.cmd)(args)
 
     def load_edge(self, edge):
-        paths = []
+        paths = set(['.deps'])
         def read(path):
-            paths.append(path)
+            paths.add(path)
             return open(path)
         prof = json.load(read(join('profiles', self.args.profile + '.json')))
         gnm = Genome(json.load(read('edges/%s.json' % edge)), prof['quality'])
         gnm.color.palette = [(t, Palette(read('palettes/%s.rgb8' % p).read()))
                              for t, p in gnm.color.palette]
         err, times = gnm.set_timing(prof['duration'], prof['fps'])
-        rev = next(self.repo.iter_commits(paths=paths)).hexsha[:12]
+        rev = next(self.repo.iter_commits(paths=list(paths))).hexsha[:12]
         # TODO: also track subrepos
-        if FLOCK_PATH_SET or self.repo.is_dirty():
+        if FLOCK_PATH_SET or paths.intersection(self.repo.untracked_files):
             rev = 'untracked'
         return prof, rev, gnm, err, times
 
     def cmd_render(self, args):
-        if not args.edges:
-            print 'Auto-render not implemented yet'
-            return
-
         import scipy
         import pycuda.autoinit
 
-        for edge in args.edges:
+        if args.edges:
+            edges = args.edges
+        else:
+            if self.repo.is_dirty():
+                sys.exit('Index or working copy has uncommitted changes.\n'
+                         'Commit them or specify specific edges to render.')
+            # TODO: automatically generated edges
+            # TODO: sort by rating, when available
+            # TODO: perform a random walk a la the sheep player, so that
+            #       contiguous sequences are rendered first when possible
+            # TODO: playlist mode
+            edges = [blob.path[6:-5].replace('/', '_')
+                     for blob in self.repo.head.commit.tree['edges'].traverse()
+                     if blob.path.endswith('.json')]
+
+        for edge in edges:
             prof, rev, gnm, err, times = self.load_edge(edge)
             odir = join('out', args.profile, edge, rev)
             if not os.path.isdir(odir):

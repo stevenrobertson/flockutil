@@ -35,7 +35,7 @@ def main():
     p.add_argument('-p', dest='profile', default=cfg.get('profile'),
             required='profile' not in cfg,
             help='Specify a profile. (Key: "profile")')
-    p.add_argument('edges', metavar='edge', nargs='+',
+    p.add_argument('edges', metavar='edge', nargs='*',
             help='Edge or loop names to render.')
 
     args = parser.parse_args()
