@@ -1,5 +1,7 @@
 #!/usr/bin/env python2
 
+import os
+import sys
 import argparse
 
 def load_cfg(path):
@@ -14,6 +16,41 @@ def load_cfg(path):
         pass
     return cfg
 
+def init(args):
+    # TODO: error handling. A lot of error handling.
+    import json
+    from git import Repo, RootModule
+    if os.path.exists(args.dir) and os.listdir(args.dir):
+        sys.exit('Directory not empty.')
+    repo = Repo.init(args.dir)
+    os.chdir(args.dir)
+    with open('.gitignore', 'w') as fp:
+        fp.write('out/\n')
+    os.mkdir('edges/')
+    open('edges/managed.txt', 'w').close()
+    open('ratings.txt', 'w').close()
+    open('.gitmodules', 'w').close()
+    os.mkdir('profiles')
+    with open('profiles/1080p.json', 'w') as fp:
+        json.dump(dict(width=1920, height=1080, duration=30, fps=24,
+            skip=0, quality=3000, output=dict(format='jpeg', quality=95)),
+            fp, sort_keys=True)
+    with open('profiles/preview.json', 'w') as fp:
+        json.dump(dict(width=640, height=360, duration=30, fps=24,
+            skip=1, quality=600, output=dict(format='jpeg', quality=90)),
+            fp, sort_keys=True)
+    os.mkdir('palettes')
+    os.mkdir('out')
+    repo.index.add(['.gitignore', 'edges', 'profiles', 'ratings.txt'])
+    repo.index.commit('Initial commit')
+    repo.create_submodule('cuburn', '.deps/cuburn', args.cp, 'master')
+    repo.create_submodule('flockutil', '.deps/flockutil', args.fp, 'master')
+    RootModule(repo).update()
+    os.symlink('.deps/flockutil/flock', 'flock')
+    repo.index.add(['flock'])
+    repo.index.commit('Add submodules')
+    repo.git.submodule('init')
+
 def main():
     cfg = load_cfg('.flockrc')
 
@@ -21,6 +58,14 @@ def main():
         epilog="Some options are required unless a default value is set.")
 
     subparsers = parser.add_subparsers()
+    p = subparsers.add_parser('init', help='Create a new flock repository.')
+    p.set_defaults(cmd='init')
+    p.add_argument('dir', nargs='?', default='.')
+    p.add_argument('-c', help='Path of remote cuburn repository.', dest='cp',
+            default='git://github.com/stevenrobertson/cuburn.git')
+    p.add_argument('-f', help='Path of remote flockutil repository.',
+            dest='fp', default='git@bitbucket.org:srobertson/flockutil.git')
+
     p = subparsers.add_parser('set', help='Set default values.')
     p.set_defaults(cmd='set')
     p.add_argument('key')
@@ -39,6 +84,9 @@ def main():
             help='Edge or loop names to render.')
 
     args = parser.parse_args()
+
+    if args.cmd == 'init':
+        return init(args)
 
     import flock
     flock.Flockutil(args)

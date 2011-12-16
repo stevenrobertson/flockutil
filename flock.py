@@ -31,7 +31,7 @@ if FLOCK_PATH_SET:
 #   host        - Connect to a server and perform its renders
 #   encode      - Go from one format to another
 #
-# init will be implemented separately so users don't have to clone twice
+# init is implemented separately so users don't have to clone twice
 
 class Flockutil(object):
     def __init__(self, args):
