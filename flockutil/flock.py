@@ -9,10 +9,7 @@ import numpy as np
 from itertools import ifilter
 from git import *
 
-from cuburn.genome import Genome, Palette, json_encode_genome
-from cuburn.render import Renderer
-
-import convert_xml
+from cuburn import genome, render
 
 FLOCK_PATH_IGNORE = bool(os.environ.get('FLOCK_PATH_IGNORE'))
 FLOCK_PATH_SET = bool(os.environ.get('FLOCK_PATH')) and not FLOCK_PATH_IGNORE
@@ -48,7 +45,7 @@ class Flockutil(object):
     def cmd_convert(self, args):
         did = 0
         for node in self.args.nodes:
-            p = convert_xml.GenomeParser()
+            p = genome.XMLGenomeParser()
             p.parse(node)
             if len(p.flames) > 10 and not args.force:
                 print ('In file %s:\n'
@@ -65,7 +62,7 @@ class Flockutil(object):
                 if os.path.isfile(path) and not args.force:
                     print 'Not overwriting %s (use "-f" to force).' % path
                     continue
-                out = json_encode_genome(convert_xml.convert_flame(flame))
+                out = genome.json_encode_genome(genome.convert_flame(flame))
                 with open(path, 'w') as fp:
                     fp.write(out.lstrip())
                 did += 1
@@ -118,14 +115,14 @@ class Flockutil(object):
                 os.unlink(llink)
             os.symlink(rev, llink)
 
-            render = Renderer()
+            renderer = render.Renderer()
             rt = [(os.path.join(odir, '%05d.jpg' % (i+1)), tc)
                   for i, tc in enumerate(times)][::prof['skip']+1]
             if args.randomize:
                 np.random.shuffle(rt)
             if rev != 'untracked':
                 rt = ifilter(lambda r: not os.path.isfile(r[0]), rt)
-            for out in render.render(gnm, rt, prof['width'], prof['height']):
+            for out in renderer.render(gnm, rt, prof['width'], prof['height']):
                 noalpha = out.buf[:,:,:3]
                 img = scipy.misc.toimage(noalpha, cmin=0, cmax=1)
                 img.save(out.idx, quality=95)
@@ -143,4 +140,3 @@ class Flockutil(object):
             return
         with open('.flockrc', 'w') as fp:
             fp.write('\n'.join(map(' '.join, cfg.items())))
-
