@@ -5,13 +5,14 @@ import sys
 import json
 import warnings
 from os.path import isfile, join
-from hashlib import sha1
 import numpy as np
 from itertools import ifilter
 from git import *
 
-from cuburn.genome import Genome, Palette
+from cuburn.genome import Genome, Palette, json_encode_genome
 from cuburn.render import Renderer
+
+import convert_xml
 
 FLOCK_PATH_SET = bool(os.environ.get('FLOCK_PATH'))
 if FLOCK_PATH_SET:
@@ -20,7 +21,7 @@ if FLOCK_PATH_SET:
 # Commands, most unimplemented:
 #   init        - Starts a Git repository with the appropriate structure
 #   set         - Set default values to use in commands
-#   import      - Reads an XML file, writes JSON
+#   convert     - Reads an XML file, writes JSON
 #   export      - Reads or creates JSON, converts to XML
 #   render      - Renders output
 #   show        - Displays latest rendering results to user
@@ -30,6 +31,8 @@ if FLOCK_PATH_SET:
 #   serve       - Launches a distribution server for multi-card rendering
 #   host        - Connect to a server and perform its renders
 #   encode      - Go from one format to another
+#   editPalette - Writes a temporary image file, lets the user edit, then
+#                 re-embeds the palette into the source genome
 #
 # init is implemented separately so users don't have to clone twice
 
@@ -39,19 +42,43 @@ class Flockutil(object):
         self.repo = Repo('.')
         getattr(self, 'cmd_' + args.cmd)(args)
 
+    def cmd_convert(self, args):
+        did = 0
+        for node in self.args.nodes:
+            p = convert_xml.GenomeParser()
+            p.parse(node)
+            if len(p.flames) > 10 and not args.force:
+                print ('In file %s:\n'
+                    'This looks like an XML frame-by-frame animation.\n'
+                    'Try importing just the keyframes, or use "-f" to force.'
+                    % node.name)
+                continue
+            basename = os.path.basename(node.name).rsplit('.', 1)[0]
+            names = ['%s_%d' % (basename, i) for i in range(len(p.flames))]
+            if len(p.flames) == 1:
+                names = [basename]
+            for name, flame in zip(names, p.flames):
+                path = os.path.join('edges', name + '.json')
+                if os.path.isfile(path) and not args.force:
+                    print 'Not overwriting %s (use "-f" to force).' % path
+                    continue
+                out = json_encode_genome(convert_xml.convert_flame(flame))
+                with open(path, 'w') as fp:
+                    fp.write(out.lstrip())
+                did += 1
+        if did > 0:
+            print ("Wrote %d genomes. Remember to run 'git add' and "
+                   "'git commit'." % did)
+
     def load_edge(self, edge):
-        paths = set(['.deps'])
-        def read(path):
-            paths.add(path)
-            return open(path)
-        prof = json.load(read(join('profiles', self.args.profile + '.json')))
-        gnm = Genome(json.load(read('edges/%s.json' % edge)), prof['quality'])
-        gnm.color.palette = [(t, Palette(read('palettes/%s.rgb8' % p).read()))
-                             for t, p in gnm.color.palette]
-        err, times = gnm.set_timing(prof['duration'], prof['fps'])
-        rev = next(self.repo.iter_commits(paths=list(paths))).hexsha[:12]
-        # TODO: also track subrepos
-        if FLOCK_PATH_SET or paths.intersection(self.repo.untracked_files):
+        ppath = join('profiles', self.args.profile + '.json')
+        gpath = join('edges', edge + '.json')
+        paths = [ppath, gpath, '.deps']
+        prof = json.load(open(ppath))
+        gnm = Genome(json.load(open(gpath)))
+        err, times = gnm.set_profile(prof)
+        rev = next(self.repo.iter_commits(paths=paths)).hexsha[:12]
+        if FLOCK_PATH_SET or set(paths).intersection(self.repo.untracked_files):
             rev = 'untracked'
         return prof, rev, gnm, err, times
 

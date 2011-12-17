@@ -34,11 +34,11 @@ def init(args):
     with open('profiles/1080p.json', 'w') as fp:
         json.dump(dict(width=1920, height=1080, duration=30, fps=24,
             skip=0, quality=3000, output=dict(format='jpeg', quality=95)),
-            fp, sort_keys=True)
+            fp, sort_keys=True, indent=2)
     with open('profiles/preview.json', 'w') as fp:
         json.dump(dict(width=640, height=360, duration=30, fps=24,
             skip=1, quality=600, output=dict(format='jpeg', quality=90)),
-            fp, sort_keys=True)
+            fp, sort_keys=True, indent=2)
     os.mkdir('palettes')
     os.mkdir('out')
     repo.index.add(['.gitignore', 'edges', 'profiles', 'ratings.txt'])
@@ -75,15 +75,26 @@ def main():
     group.add_argument('-u', dest='unset', action='store_true',
             help='Unset the given key. No value permitted.')
 
+    p = subparsers.add_parser('convert',
+            help='Convert XML nodes to JSON edges.')
+    p.set_defaults(cmd='convert')
+    p.add_argument('nodes', metavar='FILE', nargs='+', type=file,
+            help='XML genomes.')
+    p.add_argument('-o', dest='output', metavar='DIR', default='edges',
+            help='Specify alternate output directory.')
+    p.add_argument('-f', dest='force', action='store_true',
+            help='Force operation to proceed.')
+
     p = subparsers.add_parser('render', help='Render a flock.')
     p.set_defaults(cmd='render')
     p.add_argument('-p', dest='profile', default=cfg.get('profile'),
-            required='profile' not in cfg,
             help='Specify a profile. (Key: "profile")')
     p.add_argument('edges', metavar='edge', nargs='*',
             help='Edge or loop names to render.')
 
     args = parser.parse_args()
+    if args.cmd == 'render' and args.profile is None:
+        parser.error('"-p" is required when no default profile is set.')
 
     if args.cmd == 'init':
         return init(args)
