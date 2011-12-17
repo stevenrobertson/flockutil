@@ -14,8 +14,11 @@ from cuburn.render import Renderer
 
 import convert_xml
 
-FLOCK_PATH_SET = bool(os.environ.get('FLOCK_PATH'))
-if FLOCK_PATH_SET:
+FLOCK_PATH_IGNORE = bool(os.environ.get('FLOCK_PATH_IGNORE'))
+FLOCK_PATH_SET = bool(os.environ.get('FLOCK_PATH')) and not FLOCK_PATH_IGNORE
+if FLOCK_PATH_IGNORE:
+    warnings.warn('DEVS ONLY! Ignoring submodule revisions entirely.')
+elif FLOCK_PATH_SET:
     warnings.warn('Flock path is set, disabling dependency tracking.')
 
 # Commands, most unimplemented:
@@ -73,7 +76,9 @@ class Flockutil(object):
     def load_edge(self, edge):
         ppath = join('profiles', self.args.profile + '.json')
         gpath = join('edges', edge + '.json')
-        paths = [ppath, gpath, '.deps']
+        paths = [ppath, gpath]
+        if not FLOCK_PATH_IGNORE:
+            paths.append('.deps')
         prof = json.load(open(ppath))
         gnm = Genome(json.load(open(gpath)))
         err, times = gnm.set_profile(prof)
