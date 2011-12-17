@@ -39,7 +39,6 @@ def init(args):
         json.dump(dict(width=640, height=360, duration=30, fps=24,
             skip=1, quality=600, output=dict(format='jpeg', quality=90)),
             fp, sort_keys=True, indent=2)
-    os.mkdir('palettes')
     os.mkdir('out')
     repo.index.add(['.gitignore', 'edges', 'profiles', 'ratings.txt'])
     repo.index.commit('Initial commit')
