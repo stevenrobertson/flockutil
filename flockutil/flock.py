@@ -124,7 +124,7 @@ class Flockutil(object):
             if args.randomize:
                 np.random.shuffle(rt)
             if rev != 'untracked':
-                rt = filter(lambda r: not os.path.isfile(r[0]), rt)
+                rt = ifilter(lambda r: not os.path.isfile(r[0]), rt)
             for out in render.render(gnm, rt, prof['width'], prof['height']):
                 noalpha = out.buf[:,:,:3]
                 img = scipy.misc.toimage(noalpha, cmin=0, cmax=1)
