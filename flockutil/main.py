@@ -88,6 +88,8 @@ def main():
     p.set_defaults(cmd='render')
     p.add_argument('-p', dest='profile', default=cfg.get('profile'),
             help='Specify a profile. (Key: "profile")')
+    p.add_argument('-r', dest='randomize', action='store_true',
+            help='Crude hack: randomize order to allow multi-render.')
     p.add_argument('edges', metavar='edge', nargs='*',
             help='Edge or loop names to render.')
 

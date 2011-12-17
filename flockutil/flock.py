@@ -100,6 +100,8 @@ class Flockutil(object):
             edges = [blob.path[6:-5].replace('/', '_')
                      for blob in self.repo.head.commit.tree['edges'].traverse()
                      if blob.path.endswith('.json')]
+        if args.randomize:
+            np.random.shuffle(edges)
 
         for edge in edges:
             prof, rev, gnm, err, times = self.load_edge(edge)
@@ -114,6 +116,8 @@ class Flockutil(object):
             render = Renderer()
             rt = [(os.path.join(odir, '%05d.jpg' % (i+1)), tc)
                   for i, tc in enumerate(times)][::prof['skip']+1]
+            if args.randomize:
+                np.random.shuffle(rt)
             if rev != 'untracked':
                 rt = filter(lambda r: not os.path.isfile(r[0]), rt)
             for out in render.render(gnm, rt, prof['width'], prof['height']):
