@@ -76,7 +76,7 @@ class Flockutil(object):
         if not FLOCK_PATH_IGNORE:
             paths.append('.deps')
         prof = json.load(open(ppath))
-        gnm = Genome(json.load(open(gpath)))
+        gnm = genome.Genome(json.load(open(gpath)))
         err, times = gnm.set_profile(prof)
         rev = next(self.repo.iter_commits(paths=paths)).hexsha[:12]
         if FLOCK_PATH_SET or set(paths).intersection(self.repo.untracked_files):
