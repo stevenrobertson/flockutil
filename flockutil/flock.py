@@ -38,13 +38,12 @@ elif FLOCK_PATH_SET:
 
 class Flockutil(object):
     def __init__(self, args):
-        self.args = args
         self.repo = Repo('.')
         getattr(self, 'cmd_' + args.cmd)(args)
 
     def cmd_convert(self, args):
         did = 0
-        for node in self.args.nodes:
+        for node in args.nodes:
             flames = genome.XMLGenomeParser.parse(node.read())
             if len(flames) > 10 and not args.force:
                 print ('In file %s:\n'
@@ -69,19 +68,20 @@ class Flockutil(object):
             print ("Wrote %d genomes. Remember to run 'git add' and "
                    "'git commit'." % did)
 
-    def load_edge(self, edge):
-        ppath = join('profiles', self.args.profile + '.json')
-        gpath = join('edges', edge + '.json')
-        paths = [ppath, gpath]
+    def get_rev(self, paths):
         if not FLOCK_PATH_IGNORE:
-            paths.append('.deps')
-        prof = json.load(open(ppath))
-        gnm = genome.Genome(json.load(open(gpath)))
-        err, times = gnm.set_profile(prof)
-        rev = next(self.repo.iter_commits(paths=paths)).hexsha[:12]
+            paths = paths + ['.deps']
         if FLOCK_PATH_SET or set(paths).intersection(self.repo.untracked_files):
-            rev = 'untracked'
-        return prof, rev, gnm, err, times
+            return 'untracked'
+        return next(self.repo.iter_commits(paths=paths)).hexsha[:12]
+
+    def load_edge(self, edge):
+        # TODO: check for changes in linked edges and warn/error
+        # TODO: update and load managed edges
+        # TODO: support abbreviations
+        # TODO: detect edges specified by filename
+        gpath = join('edges', edge + '.json')
+        return set([gpath]), genome.Genome(json.load(open(gpath)))
 
     def cmd_render(self, args):
         import scipy
@@ -104,8 +104,13 @@ class Flockutil(object):
         if args.randomize:
             np.random.shuffle(edges)
 
+        ppath = join('profiles', args.profile + '.json')
+        prof = json.load(open(ppath))
+
         for edge in edges:
-            prof, rev, gnm, err, times = self.load_edge(edge)
+            paths, gnm = self.load_edge(edge)
+            rev = self.get_rev(list(paths) + [ppath])
+            err, times = gnm.set_profile(prof)
             odir = join('out', args.profile, edge, rev)
             if not os.path.isdir(odir):
                 os.makedirs(odir)
