@@ -152,7 +152,7 @@ class Flockutil(object):
             edges = [blob.path[6:-5].replace('/', '_')
                      for blob in self.repo.head.commit.tree['edges'].traverse()
                      if blob.path.endswith('.json')]
-            edges = self.managed_edges.keys()
+            edges += self.managed_edges.keys()
         if args.randomize:
             np.random.shuffle(edges)
 
