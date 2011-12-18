@@ -45,19 +45,18 @@ class Flockutil(object):
     def cmd_convert(self, args):
         did = 0
         for node in self.args.nodes:
-            p = genome.XMLGenomeParser()
-            p.parse(node)
-            if len(p.flames) > 10 and not args.force:
+            flames = genome.XMLGenomeParser.parse(node.read())
+            if len(flames) > 10 and not args.force:
                 print ('In file %s:\n'
                     'This looks like an XML frame-by-frame animation.\n'
                     'Try importing just the keyframes, or use "-f" to force.'
                     % node.name)
                 continue
             basename = os.path.basename(node.name).rsplit('.', 1)[0]
-            names = ['%s_%d' % (basename, i) for i in range(len(p.flames))]
-            if len(p.flames) == 1:
+            names = ['%s_%d' % (basename, i) for i in range(len(flames))]
+            if len(flames) == 1:
                 names = [basename]
-            for name, flame in zip(names, p.flames):
+            for name, flame in zip(names, flames):
                 path = os.path.join('edges', name + '.json')
                 if os.path.isfile(path) and not args.force:
                     print 'Not overwriting %s (use "-f" to force).' % path
