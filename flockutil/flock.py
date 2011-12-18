@@ -5,6 +5,7 @@ import sys
 import json
 import warnings
 from os.path import isfile, join
+from hashlib import sha1
 import numpy as np
 from itertools import ifilter
 from git import *
@@ -40,7 +41,23 @@ elif FLOCK_PATH_SET:
 class Flockutil(object):
     def __init__(self, args):
         self.repo = Repo('.')
+        try:
+            self.managed_edges = dict(self.parse_managed())
+        except:
+            import traceback
+            traceback.print_exc()
+            sys.exit('Problem parsing edges/managed.txt')
         getattr(self, 'cmd_' + args.cmd)(args)
+
+    def parse_managed(self):
+        # TODO: parse ratings, exclude bad managed edges
+        for line in open('edges/managed.txt'):
+            line = line.strip().split('#', 1)[0]
+            if not line: continue
+            idx = sha1(line).hexdigest()[:5]
+            args = line.split()
+            l, r = args[:2]
+            yield '%s.%s=%s' % (idx, l, r), args
 
     def cmd_convert(self, args):
         did = 0
@@ -74,15 +91,49 @@ class Flockutil(object):
             paths = paths + ['.deps']
         if FLOCK_PATH_SET or set(paths).intersection(self.repo.untracked_files):
             return 'untracked'
+        for p in paths:
+            # The above doesn't catch files outside of the tree entirely
+            try:
+                self.repo.head.commit.tree / p
+            except IndexError:
+                return 'untracked'
         return next(self.repo.iter_commits(paths=paths)).hexsha[:12]
+
+    def load_managed_edge(self, edge):
+        matches = filter(lambda e: e.startswith(edge), self.managed_edges)
+        if len(matches) == 0:
+            raise IndexError('No matches for edge named "%s"' % edge)
+        elif len(matches) > 1:
+            raise IndexError('"%s" ambiguous (could match %s)'
+                             % (edge, ', '.join(matches)))
+        name = matches[0]
+        args = self.managed_edges[name]
+        # It's a requirement that managed edges be present among edges/*.json
+        # TODO: handle this earlier? fail gracefully when files are missing?
+        paths = ['edges/%s.json' % s for s in args[:2]]
+        rev = self.get_rev(paths)
+        path = 'out/cache/%s.%s.json' % (name, rev)
+        if not os.path.isfile(path):
+            from main import mkparser
+            parser = mkparser()
+            args = parser.parse_args(['blend'] + args)
+            gnm, paths = self.blend(args)
+            if not os.path.isdir('out/cache'):
+                os.makedirs('out/cache')
+            with open(path, 'w') as fp:
+                fp.write(gnm)
+        return set(paths), genome.Genome(json.load(open(path)))
 
     def load_edge(self, edge):
         # TODO: check for changes in linked edges and warn/error
-        # TODO: update and load managed edges
         # TODO: support abbreviations
         # TODO: detect edges specified by filename
-        gpath = join('edges', edge + '.json')
-        return set([gpath]), genome.Genome(json.load(open(gpath)))
+        if not os.path.isfile(edge):
+            p = join('edges', edge + '.json')
+            if not os.path.isfile(p):
+                return self.load_managed_edge(edge)
+            edge = p
+        return set([edge]), genome.Genome(json.load(open(edge)))
 
     def cmd_render(self, args):
         import scipy
@@ -94,7 +145,6 @@ class Flockutil(object):
             if self.repo.is_dirty():
                 sys.exit('Index or working copy has uncommitted changes.\n'
                          'Commit them or specify specific edges to render.')
-            # TODO: automatically generated edges
             # TODO: sort by rating, when available
             # TODO: perform a random walk a la the sheep player, so that
             #       contiguous sequences are rendered first when possible
@@ -102,6 +152,7 @@ class Flockutil(object):
             edges = [blob.path[6:-5].replace('/', '_')
                      for blob in self.repo.head.commit.tree['edges'].traverse()
                      if blob.path.endswith('.json')]
+            edges = self.managed_edges.keys()
         if args.randomize:
             np.random.shuffle(edges)
 
