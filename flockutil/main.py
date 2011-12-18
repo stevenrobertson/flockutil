@@ -50,7 +50,7 @@ def init(args):
     repo.index.commit('Add submodules')
     repo.git.submodule('init')
 
-def main():
+def mkparser():
     cfg = load_cfg('.flockrc')
 
     parser = argparse.ArgumentParser(description="Manage a flock.",
@@ -93,6 +93,23 @@ def main():
     p.add_argument('edges', metavar='edge', nargs='*',
             help='Edge or loop names to render.')
 
+    p = subparsers.add_parser('blend',
+            help='Create an edge that blends between two others.')
+    p.set_defaults(cmd='blend')
+    p.add_argument('left', help='Name (or file) of genome to start at')
+    p.add_argument('right', help='Name (or file) of genome to end at')
+    p.add_argument('-a', dest='align', default='weightflip',
+            choices='natural weight weightflip color'.split(),
+            help='Sort method used to align xforms')
+    p.add_argument('-b', dest='blur', metavar='STDEV', type=float, const=1.5,
+            nargs='?', help='Blur palettes during interpolation (1.5)')
+    p.add_argument('-l', dest='nloops', metavar='LOOPS', type=int, default=2,
+            help='Number of loops to use (also scales duration) (2)')
+    p.add_argument('-o', dest='out', help='Output filename')
+    return parser
+
+def main():
+    parser = mkparser()
     args = parser.parse_args()
     if args.cmd == 'render' and args.profile is None:
         parser.error('"-p" is required when no default profile is set.')

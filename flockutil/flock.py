@@ -10,6 +10,7 @@ from itertools import ifilter
 from git import *
 
 from cuburn import genome, render
+import blend
 
 FLOCK_PATH_IGNORE = bool(os.environ.get('FLOCK_PATH_IGNORE'))
 FLOCK_PATH_SET = bool(os.environ.get('FLOCK_PATH')) and not FLOCK_PATH_IGNORE
@@ -131,6 +132,27 @@ class Flockutil(object):
                 img = scipy.misc.toimage(noalpha, cmin=0, cmax=1)
                 img.save(out.idx, quality=95)
                 print out.idx
+
+    def blend(self, args):
+        # TODO: check for canonicality of edges
+        paths, left = self.load_edge(args.left)
+        paths_, right = self.load_edge(args.right)
+        paths.update(paths_)
+
+        lxf, rxf = blend.align_xforms(left, right, args.align)
+        left['xforms'], right['xforms'] = lxf, rxf
+        bl = blend.blend_dicts(left, right, args.nloops)
+        if args.blur:
+            blend.blur_palettes(bl, args.blur)
+        return genome.json_encode_genome(bl), paths
+
+    def cmd_blend(self, args):
+        gnm, paths = self.blend(args)
+        # TODO: this breaks when using paths to specify edges
+        out = args.out or ('%s=%s.json' % (args.left, args.right))
+        with open(out, 'w') as fp:
+            fp.write(gnm)
+        print 'Wrote %s.' % out
 
     def cmd_set(self, args):
         from main import load_cfg
