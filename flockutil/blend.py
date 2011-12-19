@@ -121,12 +121,14 @@ def blend_knots(ka, kb, scalea, scaleb, mod=None, loops=None, cw=None):
 
     return SplEval([timel, vall, 0.0, vala, 1.0, valb, timer, valr])
 
-def create_pad_xform(xin, ptype='normal', posttype='normal', final='false'):
+def create_pad_xform(xin, ptype='normal', posttype='normal', final=False):
     # Create a new xform to pad with.
     # As long as this isn't a final xform, this can be anything at all
     #  since the weight goes to 0.  Stick to linear for the moment.
     xout = dict(color=xin['color'], color_speed=xin['color_speed'],
-                opacity=xin['opacity'], density=0)
+                opacity=xin['opacity'])
+    if not final:
+        xout['density'] = 0
 
     # TODO: chaos
     #if final == 'false':
@@ -286,11 +288,15 @@ def align_xforms(A, B, sort='weightflip'):
         B_xforms['final'] = Bfinal
     elif Afinal or Bfinal:
         useme = Afinal if Afinal else Bfinal
-        padfinal = create_pad_xform(useme, ptype='normal', final='true')
+        padfinal = create_pad_xform(useme, ptype='normal', final=True)
         # color_speed of final xform pad must be 0
         padfinal['color_speed'] = 0.0
-        A_xforms.setdefault('final', padfinal)
-        B_xforms.setdefault('final', padfinal)
+        if Afinal:
+            A_xforms['final'] = Afinal
+            B_xforms['final'] = padfinal
+        else:
+            A_xforms['final'] = padfinal
+            B_xforms['final'] = Bfinal
 
     # now make sure we have the same variations on each side
     A_xforms = A_xforms.copy()
