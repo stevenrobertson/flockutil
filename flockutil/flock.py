@@ -117,23 +117,25 @@ class Flockutil(object):
             from main import mkparser
             parser = mkparser()
             args = parser.parse_args(['blend'] + args)
-            gnm, paths = self.blend(args)
+            bname, paths, gnm = self.blend(args)
             if not os.path.isdir('out/cache'):
                 os.makedirs('out/cache')
             with open(path, 'w') as fp:
                 fp.write(gnm)
-        return set(paths), genome.Genome(json.load(open(path)))
+        return name, set(paths), genome.Genome(json.load(open(path)))
 
     def load_edge(self, edge):
         # TODO: check for changes in linked edges and warn/error
         # TODO: support abbreviations
         # TODO: detect edges specified by filename
-        if not os.path.isfile(edge):
-            p = join('edges', edge + '.json')
-            if not os.path.isfile(p):
+        if os.path.isfile(edge):
+            path = edge
+            edge = os.path.basename(path).rsplit('.', 1)[0]
+        else:
+            path = join('edges', edge + '.json')
+            if not os.path.isfile(path):
                 return self.load_managed_edge(edge)
-            edge = p
-        return set([edge]), genome.Genome(json.load(open(edge)))
+        return edge, set([path]), genome.Genome(json.load(open(path)))
 
     def cmd_render(self, args):
         import scipy
@@ -160,7 +162,8 @@ class Flockutil(object):
         prof = json.load(open(ppath))
 
         for edge in edges:
-            paths, gnm = self.load_edge(edge)
+            print 'Rendering %s' % edge
+            edge, paths, gnm = self.load_edge(edge)
             rev = self.get_rev(list(paths) + [ppath])
             err, times = gnm.set_profile(prof)
             odir = join('out', args.profile, edge, rev)
@@ -182,12 +185,13 @@ class Flockutil(object):
                 noalpha = out.buf[:,:,:3]
                 img = scipy.misc.toimage(noalpha, cmin=0, cmax=1)
                 img.save(out.idx, quality=95)
-                print out.idx
+                print 'Wrote %s (took %5d ms)' % (out.idx, out.gpu_time)
 
     def blend(self, args):
         # TODO: check for canonicality of edges
-        paths, left = self.load_edge(args.left)
-        paths_, right = self.load_edge(args.right)
+        lname, paths, left = self.load_edge(args.left)
+        rname, paths_, right = self.load_edge(args.right)
+        name = '%s=%s' % (lname, rname)
         paths.update(paths_)
 
         lxf, rxf = blend.align_xforms(left, right, args.align)
@@ -195,12 +199,11 @@ class Flockutil(object):
         bl = blend.blend_dicts(left, right, args.nloops)
         if args.blur:
             blend.blur_palettes(bl, args.blur)
-        return genome.json_encode_genome(bl), paths
+        return name, paths, genome.json_encode_genome(bl)
 
     def cmd_blend(self, args):
-        gnm, paths = self.blend(args)
-        # TODO: this breaks when using paths to specify edges
-        out = args.out or ('%s=%s.json' % (args.left, args.right))
+        name, paths, gnm = self.blend(args)
+        out = args.out or ('%s.json' % name)
         with open(out, 'w') as fp:
             fp.write(gnm)
         print 'Wrote %s.' % out
