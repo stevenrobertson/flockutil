@@ -27,7 +27,11 @@ def blend_dicts(A, B, num_loops, aid='unknown', bid='unknown'):
 
     def go(a, b, path=()):
         if isinstance(a, dict):
-            return dict((k, go(a[k], b[k], path+(k,))) for k in a)
+            try:
+                return dict((k, go(a[k], b[k], path+(k,))) for k in a)
+            except KeyError, e:
+                e.args = path[-1:] + e.args
+                raise e
         elif isinstance(a, SplEval):
             ik = lambda **kwargs: blend_knots(a, b, da, db, **kwargs)
             # interpolate a with b (it will exist)
@@ -62,6 +66,7 @@ def blend_dicts(A, B, num_loops, aid='unknown', bid='unknown'):
             A['palettes'][get_palette(A['color']['palette_times'], False)],
             B['palettes'][get_palette(B['color']['palette_times'], True)]
         ]
+    C['time']['duration'] = '%gs' % dc if isinstance(da, basestring) else dc
     return C
 
 def get_palette(v, right):
