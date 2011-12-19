@@ -22,7 +22,7 @@ def blend_dicts(A, B, num_loops, aid='unknown', bid='unknown'):
         raise ValueError('Cannot blend between relative- and absolute-time')
     da, db = [float(d[:-1]) if isinstance(d, basestring) else d
               for d in (da, db)]
-    dc = (da * db) / 2 * num_loops
+    dc = (da + db) / 2 * num_loops
     scalea, scaleb = dc / da, dc / db
 
     def go(a, b, path=()):
