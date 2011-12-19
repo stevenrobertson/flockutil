@@ -57,7 +57,7 @@ class Flockutil(object):
             idx = sha1(line).hexdigest()[:5]
             args = line.split()
             l, r = args[:2]
-            yield '%s=%s.%s' % (idx, l, r), args
+            yield '%s=%s.%s' % (l, r, idx), args
 
     def cmd_convert(self, args):
         did = 0
