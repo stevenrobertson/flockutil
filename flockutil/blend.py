@@ -22,7 +22,7 @@ def blend_dicts(A, B, num_loops, aid='unknown', bid='unknown'):
         raise ValueError('Cannot blend between relative- and absolute-time')
     da, db = [float(d[:-1]) if isinstance(d, basestring) else d
               for d in (da, db)]
-    dc = (da + db) / 2 * num_loops
+    dc = (da + db) * num_loops / 2.0
     scalea, scaleb = dc / da, dc / db
 
     def go(a, b, path=()):
@@ -33,7 +33,7 @@ def blend_dicts(A, B, num_loops, aid='unknown', bid='unknown'):
                 e.args = path[-1:] + e.args
                 raise e
         elif isinstance(a, SplEval):
-            ik = lambda **kwargs: blend_knots(a, b, da, db, **kwargs)
+            ik = lambda **kwargs: blend_knots(a, b, scalea, scaleb, **kwargs)
             # interpolate a with b (it will exist)
             if path[-2:] == ('affine', 'angle'):
                 if path[-3] != 'final':
