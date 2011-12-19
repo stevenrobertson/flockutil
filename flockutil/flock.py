@@ -57,7 +57,7 @@ class Flockutil(object):
             idx = sha1(line).hexdigest()[:5]
             args = line.split()
             l, r = args[:2]
-            yield '%s.%s=%s' % (idx, l, r), args
+            yield '%s=%s.%s' % (idx, l, r), args
 
     def cmd_convert(self, args):
         did = 0
@@ -100,7 +100,7 @@ class Flockutil(object):
         return next(self.repo.iter_commits(paths=paths)).hexsha[:12]
 
     def load_managed_edge(self, edge):
-        matches = filter(lambda e: e.startswith(edge), self.managed_edges)
+        matches = filter(lambda e: edge in e, self.managed_edges)
         if len(matches) == 0:
             raise IndexError('No matches for edge named "%s"' % edge)
         elif len(matches) > 1:
