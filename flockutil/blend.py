@@ -16,7 +16,7 @@ normal_affine = dict(spread=45, magnitude={'x':1, 'y':1},
 flipped_affine = dict(spread=-45, magnitude={'x':1, 'y':1},
                       angle=135, offset={'x':0, 'y':0})
 
-def blend_dicts(A, B, num_loops, aid='unknown', bid='unknown'):
+def blend_dicts(A, B, num_loops, stagger=False):
     da, db = A.time.duration, B.time.duration
     if isinstance(da, basestring) ^ isinstance(db, basestring):
         raise ValueError('Cannot blend between relative- and absolute-time')
@@ -24,16 +24,18 @@ def blend_dicts(A, B, num_loops, aid='unknown', bid='unknown'):
               for d in (da, db)]
     dc = (da + db) * num_loops / 2.0
     scalea, scaleb = dc / da, dc / db
+    rng = np.random.RandomState(42)
 
     def go(a, b, path=()):
         if isinstance(a, dict):
             try:
-                return dict((k, go(a[k], b[k], path+(k,))) for k in a)
+                return dict((k, go(a[k], b[k], path+(k,))) for k in sorted(a))
             except KeyError, e:
                 e.args = path[-1:] + e.args
                 raise e
         elif isinstance(a, SplEval):
-            ik = lambda **kwargs: blend_knots(a, b, scalea, scaleb, **kwargs)
+            ik = lambda **kwargs: blend_knots(a, b, scalea, scaleb,
+                                            rng=rng, stagger=stagger, **kwargs)
             # interpolate a with b (it will exist)
             if path[-2:] == ('affine', 'angle'):
                 if path[-3] != 'final':
@@ -57,7 +59,7 @@ def blend_dicts(A, B, num_loops, aid='unknown', bid='unknown'):
     # TODO: licenses; check license compatibility when merging
     C = go(A, B)
     C['info'] = {
-            'name': '%s=%s' % (aid, bid),
+            'name': '%s=%s' % (A.info.get('name', ''), B.info.get('name', '')),
             'authors': A.info.get('authors', []) + B.info.get('authors', [])
         }
     # TODO: add URL and flockutil revision to authors
@@ -79,7 +81,8 @@ def get_palette(v, right):
 def isflipped(xf):
     return xf['spread'](0) < 0
 
-def blend_knots(ka, kb, scalea, scaleb, mod=None, loops=None, cw=None):
+def blend_knots(ka, kb, scalea, scaleb, mod=None, loops=None, cw=None,
+                stagger=False, rng=None):
     assert ka is not None and kb is not None, 'need defaults'
 
     vala, slopea = ka(1), ka(1, deriv=1) * scalea
@@ -100,26 +103,15 @@ def blend_knots(ka, kb, scalea, scaleb, mod=None, loops=None, cw=None):
             valb += mod
         while vala-valb <= (loops - 0.5) * mod:
             valb -= mod
-#        valb += np.copysign(mod * loops, slopea)
 
-    # There are several approaches here. We start with the simplest possible
-    # one: a four-knot system, where the stabilizing knots fix the value and
-    # velocity of the parameter at t=0 and t=1 to that obtained from the
-    # respective loops, and lets the splines take care of the rest. This should
-    # always work. However, the slope at t=0 then depends on the value at t=1,
-    # and vice versa, so if someone later comes along and adds any node not
-    # already on the path, both endpoints will no longer have matching
-    # velocity.
-
-    # slopea = (valb - vall) / (timeb - timel)
-    timel = -2.0
-    vall = valb - slopea * (1.0 - timel)
-
-    # slopeb = (valr - vala) / (timer - timea)
-    timer = 3.0
-    valr = vala + slopeb * timer
-
-    return SplEval([timel, vall, 0.0, vala, 1.0, valb, timer, valr])
+    knots = [0.0, vala, 1.0, valb]
+    if stagger:
+        knots = [0.0, vala,
+                 0.05, vala + 0.05 * (slopea + rng.uniform() * (valb - vala)),
+                 0.95, valb - 0.05 * (slopeb + rng.uniform() * (valb - vala)),
+                 1.0, valb]
+    spl = SplEval(knots, slopea, slopeb)
+    return spl
 
 def create_pad_xform(xin, ptype='normal', posttype='normal', final=False):
     # Create a new xform to pad with.

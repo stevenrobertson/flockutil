@@ -196,7 +196,7 @@ class Flockutil(object):
 
         lxf, rxf = blend.align_xforms(left, right, args.align)
         left['xforms'], right['xforms'] = lxf, rxf
-        bl = blend.blend_dicts(left, right, args.nloops)
+        bl = blend.blend_dicts(left, right, args.nloops, args.stagger)
         if args.blur:
             blend.blur_palettes(bl, args.blur)
         return name, paths, genome.json_encode_genome(bl)

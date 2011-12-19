@@ -105,6 +105,8 @@ def mkparser():
             nargs='?', help='Blur palettes during interpolation (1.5)')
     p.add_argument('-l', dest='nloops', metavar='LOOPS', type=int, default=2,
             help='Number of loops to use (also scales duration) (2)')
+    p.add_argument('-s', dest='stagger', action='store_true',
+            help='Use stagger (experimental!)')
     p.add_argument('-o', dest='out', help='Output filename')
     return parser
 
