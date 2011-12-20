@@ -6,11 +6,13 @@ import json
 import warnings
 from os.path import isfile, join
 from hashlib import sha1
+from subprocess import check_output
 import numpy as np
 from itertools import ifilter
-from git import *
 
 from cuburn import genome, render
+
+from main import parse_simple
 import blend
 
 FLOCK_PATH_IGNORE = bool(os.environ.get('FLOCK_PATH_IGNORE'))
@@ -38,26 +40,173 @@ elif FLOCK_PATH_SET:
 #
 # init is implemented separately so users don't have to clone twice
 
-class Flockutil(object):
-    def __init__(self, args):
-        self.repo = Repo('.')
-        try:
-            self.managed_edges = dict(self.parse_managed())
-        except:
-            import traceback
-            traceback.print_exc()
-            sys.exit('Problem parsing edges/managed.txt')
-        getattr(self, 'cmd_' + args.cmd)(args)
+# The key representing untracked files (mostly for readability)
+UNTR = (-1, 'untracked')
 
-    def parse_managed(self):
+class Flock(object):
+    """
+    The collection of flames which comprise the current flock.
+    """
+    def __init__(self):
+        self.paths, self.revmap = self.parse_log()
+        self.dirty = self.parse_status()
+        self.managed = dict(self.parse_managed())
+        self.ratings = self.parse_ratings()
+
+        for d in self.dirty.intersection(self.paths):
+            self.paths[d] = UNTR
+
+        if not FLOCK_PATH_IGNORE:
+            deprev = min(self.paths['.deps/cuburn'],
+                         self.paths['.deps/flockutil'])
+            if FLOCK_PATH_SET:
+                deprev = UNTR
+            for k, v in self.paths.items():
+                self.paths[k] = min(deprev, v)
+
+        self.edges = dict((k[6:-5].replace('/', '_'), v)
+                          for k, v in self.paths.items()
+                          if k.startswith('edges/') and k.endswith('.json'))
+
+        print self.edges, self.managed
+
+    @staticmethod
+    def parse_status():
+        out = check_output(['git', 'status', '-z', '-uno'])
+        return set(filter(None, [f for l in out for f in l[3:].split('\0')]))
+
+    @staticmethod
+    def parse_log():
+        """
+        Parses the revision history for the current branch to determine the
+        latest revision at which a given file was changed.
+        """
+        revlist = []
+        paths = {}
+        rev = None
+        log = check_output(['git', 'log', '--name-only', '--pretty=format:%H'])
+        for line in log.split('\n'):
+            if rev is None:
+                rev = line
+                revlist.append(line)
+            elif line == '':
+                rev = None
+            else:
+                paths.setdefault(line, (len(revlist), rev))
+
+        # Identify the smallest unique prefix to use as the revid (min 6). If
+        # there is a collision, the newer revid will be extended, but the
+        # older revid will not change length.
+        shortrefs = set()
+        revmap = {}
+        revrevmap = {}
+        for i in reversed(revlist):
+            for j in range(6, 41):
+                short = i[:j]
+                if short not in shortrefs:
+                    shortrefs.add(short)
+                    revmap[short] = i
+                    revrevmap[i] = short
+                    break
+
+        # Update the paths to use shorter revs.
+        for k, v in paths.items():
+            paths[k] = (v[0], revrevmap[v[1]])
+
+        return paths, revmap
+
+    @staticmethod
+    def parse_managed():
         # TODO: parse ratings, exclude bad managed edges
-        for line in open('edges/managed.txt'):
-            line = line.strip().split('#', 1)[0]
-            if not line: continue
+        for line in parse_simple('edges/managed.txt'):
             idx = sha1(line).hexdigest()[:5]
             args = line.split()
             l, r = args[:2]
             yield '%s=%s.%s' % (l, r, idx), args
+
+    @staticmethod
+    def parse_ratings():
+        ratings = {}
+        for line in parse_simple('ratings.txt'):
+            sp = line.split()
+            if len(sp) < 4: continue
+            name, rev, user, flags = sp[:4]
+            if flags[0] not in '012345': continue
+            ratings.setdefault(name, {}).setdefault(rev, {}).setdefault(user,
+                    (int(flags[0]), flags[1:]))
+        return ratings
+
+    def find_edge(self, edge):
+        """
+        Given an edge name, return (name, path, rev, managed). If 'managed' is
+        True, 'path' will consist of the argument list used to create the
+        edge, rather than the filesystem path to the genome file.
+        """
+        path = 'edges/%s.json' % edge
+        if path in self.paths:
+            return (edge, path, self.paths[path][1], False)
+        elif edge in self.managed:
+            rev = min([self.edges.get(k, UNTR)
+                       for k in self.managed[edge][:2]])
+            return (edge, self.managed[edge], rev[1], True)
+        elif os.path.isfile(edge):
+            name = os.path.basename(path).split('.', 1)[0]
+            rev = self.paths.get(edge, UNTR)
+            return (name, edge, rev[1], False)
+        else:
+            raise KeyError('Could not find edge "%s".' % edge)
+
+    def match_edges(self, match):
+        matches = filter(lambda e: match in e,
+                         self.edges.keys() + self.managed.keys())
+        if matches:
+            return matches
+        if os.path.isfile(match):
+            return [match]
+        raise KeyError('No edges matched "%s".' % match)
+
+    def get_rating(self, edge, default=2.5):
+        if edge not in self.ratings:
+            return default
+        rev = self.find_edge(edge)[2]
+        if rev in self.ratings[edge]:
+            ratings = [v[0] for v in self.ratings[edge][rev].values()]
+        else:
+            ratings = [v[0] for d in self.ratings[edge].values()
+                            for v in d.values()]
+        return sum(ratings) / float(len(ratings))
+
+    def list_flock(self, shuffle=False, rating=False, separate=False,
+                   thresh=0):
+        """
+        Return a list of edges in the flock. If 'shuffle' is True, the order
+        will be randomized. If 'rating' is True, the edges will be sorted by
+        rating. If 'separate' is True, edges committed to the repository will
+        be listed before managed edges.
+
+        If multiple of these are True, they are applied in the order given in
+        the method signature using stable sorting.
+
+        Edges with rating lower than 'thresh' will be omitted.
+        """
+        edges = [e for e in self.edges.keys() + self.managed.keys()
+                 if self.get_rating(e) >= thresh]
+        if shuffle:
+            np.random.shuffle(edges)
+        else:
+            edges.sort()
+        if rating:
+            edges.sort(key=lambda e: self.get_rating)
+        if separate:
+            print edges
+            edges.sort(key=lambda e: e not in self.edges)
+            print edges
+        return edges
+
+class Flockutil(object):
+    def __init__(self, args):
+        self.flock = Flock()
+        getattr(self, 'cmd_' + args.cmd)(args)
 
     def cmd_convert(self, args):
         did = 0
@@ -86,32 +235,7 @@ class Flockutil(object):
             print ("Wrote %d genomes. Remember to run 'git add' and "
                    "'git commit'." % did)
 
-    def get_rev(self, paths):
-        if not FLOCK_PATH_IGNORE:
-            paths = paths + ['.deps']
-        if FLOCK_PATH_SET or set(paths).intersection(self.repo.untracked_files):
-            return 'untracked'
-        for p in paths:
-            # The above doesn't catch files outside of the tree entirely
-            try:
-                self.repo.head.commit.tree / p
-            except IndexError:
-                return 'untracked'
-        return next(self.repo.iter_commits(paths=paths)).hexsha[:12]
-
-    def load_managed_edge(self, edge):
-        matches = filter(lambda e: edge in e, self.managed_edges)
-        if len(matches) == 0:
-            raise IndexError('No matches for edge named "%s"' % edge)
-        elif len(matches) > 1:
-            raise IndexError('"%s" ambiguous (could match %s)'
-                             % (edge, ', '.join(matches)))
-        name = matches[0]
-        args = self.managed_edges[name]
-        # It's a requirement that managed edges be present among edges/*.json
-        # TODO: handle this earlier? fail gracefully when files are missing?
-        paths = ['edges/%s.json' % s for s in args[:2]]
-        rev = self.get_rev(paths)
+    def cache_managed_edge(self, name, args, rev):
         path = 'out/cache/%s.%s.json' % (name, rev)
         if not os.path.isfile(path):
             from main import mkparser
@@ -122,84 +246,76 @@ class Flockutil(object):
                 os.makedirs('out/cache')
             with open(path, 'w') as fp:
                 fp.write(gnm)
-        return name, set(paths), genome.Genome(json.load(open(path)))
+        return path
 
     def load_edge(self, edge):
         # TODO: check for changes in linked edges and warn/error
-        # TODO: support abbreviations
-        # TODO: detect edges specified by filename
-        if os.path.isfile(edge):
-            path = edge
-            edge = os.path.basename(path).rsplit('.', 1)[0]
-        else:
-            path = join('edges', edge + '.json')
-            if not os.path.isfile(path):
-                return self.load_managed_edge(edge)
-        return edge, set([path]), genome.Genome(json.load(open(path)))
+        name, path, rev, managed = self.flock.find_edge(edge)
+        if managed:
+            path = self.cache_managed_edge(name, path, rev)
+        with open(path) as fp:
+            return genome.Genome(json.load(fp)), name, rev
 
     def cmd_render(self, args):
         import scipy
         import pycuda.autoinit
 
         if args.edges:
-            edges = args.edges
+            if args.match:
+                edges = set(sum(map(self.flock.match_edges, args.edges), []))
+            else:
+                edges = args.edges
         else:
-            if self.repo.is_dirty():
+            if self.flock.dirty:
                 sys.exit('Index or working copy has uncommitted changes.\n'
                          'Commit them or specify specific edges to render.')
-            # TODO: sort by rating, when available
-            # TODO: perform a random walk a la the sheep player, so that
-            #       contiguous sequences are rendered first when possible
             # TODO: playlist mode
-            edges = [blob.path[6:-5].replace('/', '_')
-                     for blob in self.repo.head.commit.tree['edges'].traverse()
-                     if blob.path.endswith('.json')]
-            edges += self.managed_edges.keys()
-        if args.randomize:
-            np.random.shuffle(edges)
+            edges = self.flock.list_flock(args.randomize,
+                    not args.ignore_ratings, args.committed, args.thresh)
 
         ppath = join('profiles', args.profile + '.json')
         prof = json.load(open(ppath))
 
-        for edge in edges:
-            print 'Rendering %s' % edge
-            edge, paths, gnm = self.load_edge(edge)
-            rev = self.get_rev(list(paths) + [ppath])
-            err, times = gnm.set_profile(prof)
-            odir = join('out', args.profile, edge, rev)
-            if not os.path.isdir(odir):
-                os.makedirs(odir)
-            llink = join('out', args.profile, edge, 'latest')
-            if os.path.islink(llink):
-                os.unlink(llink)
-            os.symlink(rev, llink)
+        for p in range(args.passes):
+            for edge in edges:
+                print 'Rendering %s' % edge
+                gnm, name, rev = self.load_edge(edge)
+                err, times = gnm.set_profile(prof)
+                odir = join('out', args.profile, edge, rev)
+                if not os.path.isdir(odir):
+                    os.makedirs(odir)
+                llink = join('out', args.profile, edge, 'latest')
+                if os.path.islink(llink):
+                    os.unlink(llink)
+                os.symlink(rev, llink)
 
-            renderer = render.Renderer()
-            rt = [(os.path.join(odir, '%05d.jpg' % (i+1)), tc)
-                  for i, tc in enumerate(times)][::prof['skip']+1]
-            if args.randomize:
-                np.random.shuffle(rt)
-            if rev != 'untracked':
-                rt = ifilter(lambda r: not os.path.isfile(r[0]), rt)
-            for out in renderer.render(gnm, rt, prof['width'], prof['height']):
-                noalpha = out.buf[:,:,:3]
-                img = scipy.misc.toimage(noalpha, cmin=0, cmax=1)
-                img.save(out.idx, quality=95)
-                print 'Wrote %s (took %5d ms)' % (out.idx, out.gpu_time)
+                renderer = render.Renderer()
+                rt = [(os.path.join(odir, '%05d.jpg' % (i+1)), tc)
+                      for i, tc in enumerate(times)]
+                rt = rt[::(prof['skip']+1)*(2**(args.passes-p-1))]
+                if args.randomize:
+                    np.random.shuffle(rt)
+                if rev != 'untracked':
+                    rt = ifilter(lambda r: not os.path.isfile(r[0]), rt)
+                w, h = prof['width'], prof['height']
+                for out in renderer.render(gnm, rt, w, h):
+                    noalpha = out.buf[:,:,:3]
+                    img = scipy.misc.toimage(noalpha, cmin=0, cmax=1)
+                    img.save(out.idx, quality=95)
+                    print 'Wrote %s (took %5d ms)' % (out.idx, out.gpu_time)
 
     def blend(self, args):
-        # TODO: check for canonicality of edges
-        lname, paths, left = self.load_edge(args.left)
-        rname, paths_, right = self.load_edge(args.right)
+        # TODO: check for canonicity of edges
+        lname, lpath, lrev, m = self.flock.find_edge(args.left)
+        rname, rpath, rrev, m = self.flock.find_edge(args.right)
         name = '%s=%s' % (lname, rname)
-        paths.update(paths_)
+        l, r = [genome.Genome(json.load(open(p))) for p in (lpath, rpath)]
 
-        lxf, rxf = blend.align_xforms(left, right, args.align)
-        left['xforms'], right['xforms'] = lxf, rxf
-        bl = blend.blend_dicts(left, right, args.nloops, args.stagger)
+        l['xforms'], r['xforms'] = blend.align_xforms(l, r, args.align)
+        bl = blend.blend_dicts(l, r, args.nloops, args.stagger)
         if args.blur:
             blend.blur_palettes(bl, args.blur)
-        return name, paths, genome.json_encode_genome(bl)
+        return name, min(lrev, rrev)[1], genome.json_encode_genome(bl)
 
     def cmd_blend(self, args):
         name, paths, gnm = self.blend(args)

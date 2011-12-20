@@ -5,16 +5,25 @@ import sys
 import argparse
 from subprocess import check_call
 
-def load_cfg(path):
-    cfg = {}
+def parse_simple(path):
+    """Parse a simple line-based file, stripping comments and empty lines."""
     try:
         with open(path) as fp:
             for line in fp:
-                kv = line.strip().split('#', 1)[0].split(' ', 1)
-                if len(kv) != 2: continue
-                cfg[kv[0]] = kv[1]
-    except IOError:
-        pass
+                line = line.strip().split('#', 1)[0]
+                if not line: continue
+                yield line
+    except:
+        import traceback
+        traceback.print_exc()
+        sys.exit('Problem parsing ' + path)
+
+def load_cfg(path):
+    cfg = {}
+    for line in parse_simple(path):
+        kv = line.split(' ', 1)
+        if len(kv) != 2: continue
+        cfg[kv[0]] = kv[1]
     return cfg
 
 INITIAL_REPO = {
@@ -49,7 +58,7 @@ def init(args):
     check_call(['git', 'commit', '-m', 'Initial commit.'])
 
 def mkparser():
-    cfg = load_cfg('.flockrc')
+    cfg = load_cfg('.flockrc') if os.path.isfile('.flockrc') else {}
 
     parser = argparse.ArgumentParser(description="Manage a flock.",
         epilog="Some options are required unless a default value is set.")
@@ -84,12 +93,26 @@ def mkparser():
 
     p = subparsers.add_parser('render', help='Render a flock.')
     p.set_defaults(cmd='render')
-    p.add_argument('-p', dest='profile', default=cfg.get('profile'),
-            help='Specify a profile. (Key: "profile")')
-    p.add_argument('-r', dest='randomize', action='store_true',
-            help='Crude hack: randomize order to allow multi-render.')
     p.add_argument('edges', metavar='edge', nargs='*',
             help='Edge or loop names to render.')
+    p.add_argument('-p', dest='profile', default=cfg.get('profile'),
+            help='Specify a profile. (Key: "profile")')
+    p.add_argument('-m', dest='match', action='store_true',
+            help='Match any edge whose name contains the given substring, '
+            'instead of matching names exactly.')
+    # TODO: this should be replaced by graph-aware ordering
+    p.add_argument('-c', dest='committed', action='store_true',
+            help='Render committed edges before managed ones.')
+    p.add_argument('-r', dest='randomize', action='store_true',
+            help='Render edges and frames in random order. (Useful when '
+            'running multiple instances simultaneously.)')
+    p.add_argument('-t', dest='thresh', default=2, type=int,
+            help='Only render edges with at least this rating (2). (Unrated '
+            'edges have a default rating of 2.5.)')
+    p.add_argument('--passes', default=1, type=int,
+            help='Skip 2^(passes-1) frames at first, come back for them later')
+    p.add_argument('--ignore-ratings', action='store_true',
+            help="Don't use ratings to sort render order.")
 
     p = subparsers.add_parser('blend',
             help='Create an edge that blends between two others.')
