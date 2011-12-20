@@ -196,7 +196,7 @@ class Flock(object):
         else:
             edges.sort()
         if rating:
-            edges.sort(key=lambda e: self.get_rating)
+            edges.sort(key=lambda e: -self.get_rating(e))
         if separate:
             print edges
             edges.sort(key=lambda e: e not in self.edges)
