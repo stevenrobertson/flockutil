@@ -3,6 +3,7 @@
 import os
 import sys
 import argparse
+from subprocess import check_call
 
 def load_cfg(path):
     cfg = {}
@@ -16,39 +17,36 @@ def load_cfg(path):
         pass
     return cfg
 
+INITIAL_REPO = {
+    '.gitignore': 'out/',
+    'edges/managed.txt': "# Add edges here or use './flock addEdges'.",
+    'ratings.txt': '# edgename revid user flags [comments]',
+    'profiles/1080p.json': dict(width=1920, height=1080, duration=30, fps=24,
+            skip=0, quality=3000, output=dict(format='jpeg', quality=95)),
+    'profiles/preview.json': dict(width=640, height=360, duration=30, fps=24,
+            skip=1, quality=600, output=dict(format='jpeg', quality=90))
+}
+
 def init(args):
     # TODO: error handling. A lot of error handling.
     import json
-    from git import Repo, RootModule
     if os.path.exists(args.dir) and os.listdir(args.dir):
         sys.exit('Directory not empty.')
-    repo = Repo.init(args.dir)
+    check_call(['git', 'init', args.dir])
     os.chdir(args.dir)
-    with open('.gitignore', 'w') as fp:
-        fp.write('out/\n')
-    os.mkdir('edges/')
-    open('edges/managed.txt', 'w').close()
-    open('ratings.txt', 'w').close()
-    open('.gitmodules', 'w').close()
-    os.mkdir('profiles')
-    with open('profiles/1080p.json', 'w') as fp:
-        json.dump(dict(width=1920, height=1080, duration=30, fps=24,
-            skip=0, quality=3000, output=dict(format='jpeg', quality=95)),
-            fp, sort_keys=True, indent=2)
-    with open('profiles/preview.json', 'w') as fp:
-        json.dump(dict(width=640, height=360, duration=30, fps=24,
-            skip=1, quality=600, output=dict(format='jpeg', quality=90)),
-            fp, sort_keys=True, indent=2)
-    os.mkdir('out')
-    repo.index.add(['.gitignore', 'edges', 'profiles', 'ratings.txt'])
-    repo.index.commit('Initial commit')
-    repo.create_submodule('cuburn', '.deps/cuburn', args.cp, 'master')
-    repo.create_submodule('flockutil', '.deps/flockutil', args.fp, 'master')
-    RootModule(repo).update()
+    check_call(['git', 'submodule', 'add', args.cp, '.deps/cuburn'])
+    check_call(['git', 'submodule', 'add', args.fp, '.deps/flockutil'])
+    for dir in 'edges profiles out'.split():
+        os.mkdir(dir)
+    for path, contents in INITIAL_REPO.items():
+        if isinstance(contents, dict):
+            contents = json.dumps(contents, sort_keys=True, indent=2)
+        contents = contents.strip() + '\n'
+        with open(path, 'w') as fp:
+            fp.write(contents)
     os.symlink('.deps/flockutil/flock', 'flock')
-    repo.index.add(['flock'])
-    repo.index.commit('Add submodules')
-    repo.git.submodule('init')
+    check_call(['git', 'add', '-A'])
+    check_call(['git', 'commit', '-m', 'Initial commit.'])
 
 def mkparser():
     cfg = load_cfg('.flockrc')
