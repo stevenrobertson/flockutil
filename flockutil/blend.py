@@ -39,9 +39,9 @@ def blend_dicts(A, B, num_loops, stagger=False):
             # interpolate a with b (it will exist)
             if path[-2:] == ('affine', 'angle'):
                 if path[-3] != 'final':
-                    if a(0) == a(1) and b(0) == b(1):
+                    if abs(a(1, 1)) < 1e-6 and abs(b(0, 1)) < 1e-6:
                         return ik(cw=1)
-                    elif a(0) == a(1) or b(0) == b(1):
+                    elif abs(a(1, 1)) < 1e-6 or abs(b(0, 1)) < 1e-6:
                         return ik(mod=360, loops=1)
                     else:
                         return ik(mod=360, loops=num_loops)
