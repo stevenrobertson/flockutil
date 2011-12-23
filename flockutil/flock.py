@@ -68,8 +68,6 @@ class Flock(object):
                           for k, v in self.paths.items()
                           if k.startswith('edges/') and k.endswith('.json'))
 
-        print self.edges, self.managed
-
     @staticmethod
     def parse_status():
         out = check_output(['git', 'status', '-z', '-uno'])
@@ -198,9 +196,7 @@ class Flock(object):
         if rating:
             edges.sort(key=lambda e: -self.get_rating(e))
         if separate:
-            print edges
             edges.sort(key=lambda e: e not in self.edges)
-            print edges
         return edges
 
 class Flockutil(object):

@@ -2,12 +2,13 @@
 
 # Copyright 2011 Eric Reckase <e.reckase@gmail.com>.
 
-import numpy as np
-import scipy.ndimage
 from copy import deepcopy
+import numpy as np
+from scipy.ndimage.filters import gaussian_filter1d
 
 from cuburn import genome
 from cuburn.genome import SplEval
+from cuburn.code.interp import Palette
 
 pad_arg = 'normal', 'flipped'
 
@@ -69,6 +70,7 @@ def blend_dicts(A, B, num_loops, stagger=False):
             B['palettes'][get_palette(B['color']['palette_times'], True)]
         ]
     C['time']['duration'] = '%gs' % dc if isinstance(da, basestring) else dc
+    checkpalflip(C)
     return C
 
 def get_palette(v, right):
@@ -308,23 +310,39 @@ def align_xforms(A, B, sort='weightflip'):
 
     return map(genome._AttrDict._wrap, (A_xforms, B_xforms))
 
-def blur_palettes(genome, blur_stdev=1.5):
-    assert len(genome['palettes']) == 2
-    genome['palettes'].extend([create_blurred_palette(p, blur_stdev)
-                               for p in genome['palettes']])
-    genome['color']['palette_times'] = [0.0, '0', 0.1, '2', 0.9, '3', 1.0, '1']
+def checkpalflip(gnm):
+    if 'final' in gnm['xforms']:
+        f = gnm['xforms']['final']
+        fcv, fcsp = f['color'], f['color_speed']
+    else:
+        fcv, fcsp = SplEval(0), SplEval(0)
+    sansfinal = [v for k, v in gnm['xforms'].items() if k != 'final']
 
-def create_blurred_palette(enc_palette, blur_stdev=1.5):
-    # This assumes input color space is CIERGB D65, encoded with gamma 2.2.
-    # Note that some colors may exceed the sRGB and YUV gamuts here
-    # TODO: specify color space for blur
-    # TODO: move color conversion to a cuburn module
-    pal = genome.palette_decode(enc_palette)
+    lc, rc = [np.array([v['color'](t) * (1 - fcsp(t)) + fcv(t) * fcsp(t)
+               for v in sansfinal]) for t in (0, 1)]
+    rcrv = 1 - rc
+    # TODO: use spline integration instead of L2
+    dens = np.array([np.hypot(v['density'](0), v['density'](1))
+                     for v in sansfinal])
+    if np.sum(np.abs(dens * (rc - lc))) > np.sum(np.abs(dens * (rcrv - lc))):
+        print 'FLIPPING'
+        palflip(gnm)
 
-    cconv = np.matrix([[ 0.2215,  0.7154,  0.0721],
-                       [-0.1145, -0.3855,  0.5   ],
-                       [ 0.5016, -0.4556, -0.0459]])
-    yuv = cconv * pal[:,:3].T
-    yuvblur = scipy.ndimage.filters.gaussian_filter(yuv, (0, blur_stdev))
-    palblur = (cconv.I * yuvblur).T
-    return genome.palette_encode(palblur)
+def palflip(gnm):
+    for v in gnm['xforms'].values():
+        c = v['color']
+        v['color'] = SplEval([0, c(0), 1, 1 - c(1)], c(0, 1), -c(1, 1))
+    pal = genome.palette_decode(gnm['palettes'][1])
+    gnm['palettes'][1] = genome.palette_encode(np.flipud(pal))
+
+def blur_palettes(gnm, blur_stdev=4):
+    assert len(gnm['palettes']) == 2
+    gnm['palettes'].extend([create_blurred_palette(p, blur_stdev)
+                            for p in gnm['palettes']])
+    gnm['color']['palette_times'] = [0.0, '0', 0.1, '2', 0.9, '3', 1.0, '1']
+
+def create_blurred_palette(enc_palette, blur_stdev):
+    y, uvr, uvt, a = Palette.rgbtoyuvpolar(genome.palette_decode(enc_palette))
+    uvt = gaussian_filter1d(uvt, blur_stdev)
+    y, uvr, a = [gaussian_filter1d(ch, blur_stdev * 0.5) for ch in y, uvr, uvt]
+    return genome.palette_encode(Palette.yuvpolartorgb(y, uvr, uvt, a))
