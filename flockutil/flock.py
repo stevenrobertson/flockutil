@@ -179,7 +179,7 @@ class Flock(object):
                             for v in d.values()]
         return sum(ratings) / float(len(ratings))
 
-    def list_flock(self, shuffle=False, rating=False, separate=False,
+    def list_flock(self, shuffle=False, rating=True, separate=False,
                    thresh=0):
         """
         Return a list of edges in the flock. If 'shuffle' is True, the order
