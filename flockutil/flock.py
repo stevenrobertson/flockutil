@@ -3,10 +3,15 @@
 import os
 import sys
 import json
+import random
+import shutil
 import warnings
 from os.path import isfile, join
+from glob import glob
 from hashlib import sha1
-from subprocess import check_output
+from tempfile import mkdtemp
+from subprocess import check_output, CalledProcessError, STDOUT
+from contextlib import contextmanager
 import numpy as np
 from itertools import ifilter
 
@@ -253,9 +258,6 @@ class Flockutil(object):
             return genome.Genome(json.load(fp)), name, rev
 
     def cmd_render(self, args):
-        import scipy
-        import pycuda.autoinit
-
         if args.edges:
             if args.match:
                 edges = set(sum(map(self.flock.match_edges, args.edges), []))
@@ -280,25 +282,46 @@ class Flockutil(object):
                 odir = join('out', args.profile, edge, rev)
                 if not os.path.isdir(odir):
                     os.makedirs(odir)
-                llink = join('out', args.profile, edge, 'latest')
-                if os.path.islink(llink):
-                    os.unlink(llink)
-                os.symlink(rev, llink)
+                    self.start_log(odir, name, rev, times, prof)
 
-                renderer = render.Renderer()
-                rt = [(os.path.join(odir, '%05d.jpg' % (i+1)), tc)
-                      for i, tc in enumerate(times)]
+                rt = list(enumerate(times, 1))
                 rt = rt[::(prof['skip']+1)*(2**(args.passes-p-1))]
                 if args.randomize:
                     np.random.shuffle(rt)
+
                 if rev != 'untracked':
-                    rt = ifilter(lambda r: not os.path.isfile(r[0]), rt)
-                w, h = prof['width'], prof['height']
-                for out in renderer.render(gnm, rt, w, h):
-                    noalpha = out.buf[:,:,:3]
-                    img = scipy.misc.toimage(noalpha, cmin=0, cmax=1)
-                    img.save(out.idx, quality=95)
-                    print 'Wrote %s (took %5d ms)' % (out.idx, out.gpu_time)
+                    llink = join('out', args.profile, edge, 'latest')
+                    if os.path.islink(llink):
+                        os.unlink(llink)
+                    os.symlink(rev, llink)
+                    rt = ifilter(lambda r: not os.path.isfile(topath(r[0])), rt)
+                self.render_frames(odir, gnm, prof, rt)
+
+    @staticmethod
+    def start_log(odir, name, rev, times, prof):
+        with open(join(odir, 'log.txt'), 'w') as fp:
+            fp.write('%s rev=%s nf=%d\n' %
+                     (name, rev, len(times) / (prof['skip']+1)))
+
+    @staticmethod
+    def topath(odir, idx):
+        return join(odir, '%05d.jpg' % idx)
+
+    def render_frames(self, odir, gnm, prof, rt):
+        import scipy
+        import pycuda.autoinit
+
+        renderer = render.Renderer()
+        w, h = prof['width'], prof['height']
+        for out in renderer.render(gnm, rt, w, h):
+            noalpha = out.buf[:,:,:3]
+            img = scipy.misc.toimage(noalpha, cmin=0, cmax=1)
+            path = self.topath(odir, out.idx)
+            img.save(path, quality=95)
+            with open(join(odir, 'log.txt'), 'a') as fp:
+                # TODO: add unique GPU id, other frame stats
+                fp.write('%d g=%d\n' % (out.idx, out.gpu_time))
+            print 'Wrote %s (took %5d ms)' % (path, out.gpu_time)
 
     def blend(self, args):
         # TODO: check for canonicity of edges
@@ -329,3 +352,78 @@ class Flockutil(object):
             return
         with open('.flockrc', 'w') as fp:
             fp.write('\n'.join(map(' '.join, cfg.items())))
+
+    def cmd_update(self, args):
+        assert not self.flock.dirty, 'Repository is dirty.'
+        edges = self.flock.list_flock()
+
+        # TODO: only use profiles in repo?
+        if not args.profiles:
+            args.profiles = [p[9:-5] for p in glob('profiles/*.json')]
+
+        for pname in args.profiles:
+            prof = json.load(open(join('profiles', pname + '.json')))
+            for edge in edges:
+                print '\n', pname, edge
+                ldir = os.path.realpath(join('out', pname, edge, 'latest'))
+                if not os.path.isdir(ldir): continue
+                # TODO: determine ext from output format
+                idxs = [int(i.rsplit('/', 1)[-1].rsplit('.', 1)[0])
+                        for i in glob(ldir + '/*.jpg')]
+                if len(idxs) < 10 * args.nframes: continue
+                gnm, name, rev = self.load_edge(edge)
+                odir = join('out', pname, edge, rev)
+                if os.path.isdir(odir): continue
+
+                def cmp(d1, d2, rt, thresh=0):
+                    for i, t in rt:
+                        # TODO: implement SSIM
+                        p1, p2 = self.topath(d1, i), self.topath(d2, i)
+                        cmp = check_output(['compare', '-metric', 'RMSE',
+                                    p1, p2, '/tmp/ignore.jpg'], stderr=STDOUT)
+                        v = float(cmp.split('(')[1].split(')')[0])
+                        print 'Frame %05d: %g' % (i, v)
+                        if v > thresh:
+                            yield ((i, t), v)
+
+                err, times = gnm.set_profile(prof)
+                if len(times) < max(idxs): continue
+                rt = list(enumerate(times, 1))
+                rt = [rt[i-1] for i in random.sample(idxs, args.nframes)]
+
+                with TemporaryDir() as tdir:
+                    cp = lambda: shutil.copytree(tdir, odir)
+
+                    print 'Rendering frames for comparaison'
+                    self.start_log(tdir, name, rev, times, prof)
+                    self.render_frames(tdir, gnm, prof, rt)
+                    try:
+                        retry = dict(cmp(ldir, tdir, rt, args.diff))
+                    except CalledProcessError:
+                        cp()
+                        continue
+
+                    if retry:
+                        print 'Absolute threshold exceeded'
+                        if args.reldiff <= 1:
+                            cp()
+                            continue
+                        print 'Computing self-similarity for relative threshold'
+                        with TemporaryDir() as tdir2:
+                            self.render_frames(tdir2, gnm, prof, retry.keys())
+                            retried = dict(cmp(tdir, tdir2, retry.keys()))
+                            hi = max(retry[k] / retried[k] for k in retry)
+                            print hi
+                            if hi > args.reldiff:
+                                print 'Relative threshold exceeded (%g)' % hi
+                                cp()
+                                continue
+
+                print 'Looks good, linking to old genome'
+                os.symlink(os.path.relpath(ldir, os.path.dirname(odir)), odir)
+
+@contextmanager
+def TemporaryDir():
+    dir = mkdtemp()
+    yield dir
+    shutil.rmtree(dir)

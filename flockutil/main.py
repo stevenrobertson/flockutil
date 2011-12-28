@@ -129,6 +129,35 @@ def mkparser():
     p.add_argument('-s', dest='stagger', action='store_true',
             help='Use stagger (experimental!)')
     p.add_argument('-o', dest='out', help='Output filename')
+
+    p = subparsers.add_parser('update',
+            help="Link output directories which don't need re-rendering.",
+            epilog="""
+This command scans the output directories for each output profile. For each
+profile and edge which both requires re-rendering and has enough frames in the
+'latest' directory, a small number of frames will be rendered. If those frames
+match, the directory for the current revid will be symlinked to the directory
+at which 'latest' points; otherwise, a new directory will be created with the
+test frames in it.
+
+Frames can match based on absolute image metric similarity. If that match
+fails, as it often will for noisy images, the frames are re-rendered, and the
+relative difference between the two frames rendered using current versions is
+used as an alternative threshold.
+""")
+    p.set_defaults(cmd='update')
+    p.add_argument('-d', dest='deps', action='store_false',
+            help='Skip checking for updated dependencies')
+    p.add_argument('-r', dest='renders', action='store_false',
+            help='Skip checking old frames')
+    p.add_argument('-n', dest='nframes', type=int, default=4,
+            help='Number of frames to test (4)')
+    p.add_argument('-p', dest='profiles', action='append',
+            help='Profile to test (all), may be given multiple times')
+    p.add_argument('--diff', type=float, default=0.01,
+            help='Maximum mean SSIM deviation to accept frame (0.01)')
+    p.add_argument('--reldiff', type=float, default=1.1,
+            help='Maximum relative SSIM error to accept frame (1.1)')
     return parser
 
 def main():
