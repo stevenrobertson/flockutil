@@ -17,15 +17,71 @@ normal_affine = dict(spread=45, magnitude={'x':1, 'y':1},
 flipped_affine = dict(spread=-45, magnitude={'x':1, 'y':1},
                       angle=135, offset={'x':0, 'y':0})
 
-def blend_dicts(A, B, num_loops, stagger=False):
+def blend_genomes(left, right, nloops=2, align='weightflip', seed=None,
+        stagger=False, blur=None, palflip=True):
+    """
+    Blend two genomes. Returns the blended genome dictionary as an _AttrDict.
+
+    ``left`` and ``right`` are the respective source genomes.
+
+    ``num_loops`` is the number of complete loops through which xforms will be
+    rotated. Use at least two to avoid singularities and backwards rotations.
+
+    ``align`` changes the sort applied before aligning xforms.
+
+    ``seed`` is the seed for the random number generator. If not supplied, a
+    hash of the combined xform name (from the ``info`` genome section, not
+    from filenames) will be used.
+
+    ``stagger`` will be changed soon, don't count on it.
+
+    ``blur``, if set to a positive value, will spatially blur the color
+    palettes with a standard deviation of that value, and insert the blurred
+    palettes near (but not at) the start and end of the blended edge.
+
+    ``palflip``, if True, will flip the palette of the right node in
+    color-coordinate space, as well as the colors of all xforms, when it is
+    determined that this will result in a smaller overall change in color
+    coordinates throughout the edge. This reduces the appearance of abrupt
+    changes in hue during the edge.
+    """
+    left, right = map(genome._AttrDict, (left, right))
+    align_xforms(left, right, align)
+    name = '%s=%s' % (left.info.get('name', ''), right.info.get('name', ''))
+    if seed is None:
+        seed = map(ord, name)
+    rng = np.random.RandomState(seed)
+
+    blend = blend_splines(left, right, nloops, rng, stagger)
+    # TODO: licenses; check license compatibility when merging
+    # TODO: add URL and flockutil revision to authors
+    blend['info'] = {
+            'name': name,
+            'authors': sum([g.info.get('authors', []) for g in left, right], [])
+        }
+    blend['info']['authors'].append('flockutil')
+    blend['palettes'] = [get_palette(left, False), get_palette(right, True)]
+
+    if blur:
+        blur_palettes(blend, blur)
+
+    if palflip:
+        checkpalflip(blend)
+
+    return blend
+
+def blend_splines(A, B, nloops, rng, stagger=False):
+    """
+    Blend the splines of two aligned genomes. Returns a new top-level
+    genome dict.
+    """
     da, db = A.time.duration, B.time.duration
     if isinstance(da, basestring) ^ isinstance(db, basestring):
         raise ValueError('Cannot blend between relative- and absolute-time')
     da, db = [float(d[:-1]) if isinstance(d, basestring) else d
               for d in (da, db)]
-    dc = (da + db) * num_loops / 2.0
+    dc = (da + db) * nloops / 2.0
     scalea, scaleb = dc / da, dc / db
-    rng = np.random.RandomState(42)
 
     def go(a, b, path=()):
         if isinstance(a, dict):
@@ -35,82 +91,75 @@ def blend_dicts(A, B, num_loops, stagger=False):
                 e.args = path[-1:] + e.args
                 raise e
         elif isinstance(a, SplEval):
-            ik = lambda **kwargs: blend_knots(a, b, scalea, scaleb,
-                                            rng=rng, stagger=stagger, **kwargs)
+            ik = lambda nl: blend_spline(a, b, scalea, scaleb, nloops=nl,
+                                         rng=rng, stagger=stagger)
             # interpolate a with b (it will exist)
             if path[-2:] == ('affine', 'angle'):
                 if path[-3] != 'final':
                     if abs(a(1, 1)) < 1e-6 and abs(b(0, 1)) < 1e-6:
-                        return ik(cw=1)
+                        return ik(0)
                     elif abs(a(1, 1)) < 1e-6 or abs(b(0, 1)) < 1e-6:
-                        return ik(mod=360, loops=1)
+                        return ik(1)
                     else:
-                        return ik(mod=360, loops=num_loops)
+                        return ik(nloops)
                 else:
-                    return ik(cw=1)
-            elif path[-2:] == ('post', 'angle'):
-                return ik(cw=1)
-            return ik()
+                    return ik(0)
+            elif path[-2:] in [('post', 'angle'), ('camera', 'rotation')]:
+                return ik(0)
+            return ik(None)
         elif path == ('color', 'palette_times'):
-            # For now, we just use linear HSV interpolation.
+            # TODO: more advanced specification of palette interpolation
             return [0.0, "0", 1.0, "1"]
         else:
             return a
 
-    # TODO: licenses; check license compatibility when merging
     C = go(A, B)
-    C['info'] = {
-            'name': '%s=%s' % (A.info.get('name', ''), B.info.get('name', '')),
-            'authors': A.info.get('authors', []) + B.info.get('authors', [])
-        }
-    # TODO: add URL and flockutil revision to authors
-    C['info']['authors'].append('flockutil')
-    C['palettes'] = [
-            A['palettes'][get_palette(A['color']['palette_times'], False)],
-            B['palettes'][get_palette(B['color']['palette_times'], True)]
-        ]
     C['time']['duration'] = '%gs' % dc if isinstance(da, basestring) else dc
-    checkpalflip(C)
     return C
 
-def get_palette(v, right):
+def get_palette(g, right):
+    v = g['color']['palette_times']
     if isinstance(v, basestring):
-        return int(v)
-    if right:
-        return int(v[1])
-    return int(v[-1])
+        v = int(v)
+    elif right:
+        v = int(v[1])
+    else:
+        v = int(v[-1])
+    return g['palettes'][v]
 
 def isflipped(xf):
     return xf['spread'](0) < 0
 
-def blend_knots(ka, kb, scalea, scaleb, mod=None, loops=None, cw=None,
-                stagger=False, rng=None):
-    assert ka is not None and kb is not None, 'need defaults'
+def blend_spline(ka, kb, scalea, scaleb, nloops=None,
+                 stagger=False, rng=None):
+    """
+    Blend a pair of splines. Returns a new SplEval.
 
+    ``ka`` and ``kb`` are the left and right SplEval splines.
+
+    ``scalea`` and ``scaleb`` are the ratios of the blended duration over the
+    left and right durations, used to scale velocities.
+
+    ``nloops``, if not None, indicates that ``ka`` and ``kb`` represent an
+    angle in degrees, and specifies the number of clockwise rotations that
+    should be taken in this path. Specifically, the difference between the
+    start and end values will satisfy ``-180 <= diff + 360 * nloops <= 180``.
+
+    ``stagger`` and ``rng`` will be replaced soon.
+    """
     vala, slopea = ka(1), ka(1, deriv=1) * scalea
     valb, slopeb = kb(0), kb(0, deriv=1) * scaleb
 
-    if mod:
-        vala, valb = vala % mod, valb % mod
-
-    if cw:
-        if valb - vala > 179:
-            valb -= 360
-        if valb - vala < -179:
-            valb += 360
-
-    if loops:
-        valb -= mod * loops
-        while vala-valb >= (loops + 0.5) * mod:
-            valb += mod
-        while vala-valb <= (loops - 0.5) * mod:
-            valb -= mod
+    if nloops is not None:
+        vala, valb = vala % 360, valb % 360
+        valb = vala + ((valb - vala + 180) % 360) - 180
+        valb += nloops * -360
 
     knots = [0.0, vala, 1.0, valb]
     if stagger:
         knots = [0.0, vala,
-                 0.05, vala + 0.05 * (slopea + rng.uniform() * (valb - vala)),
-                 0.95, valb - 0.05 * (slopeb + rng.uniform() * (valb - vala)),
+                 0.05, vala + 0.05 * (slopea + rng.uniform(high=0.2) * (valb - vala)),
+                 0.95, valb - 0.05 * (slopeb + rng.uniform(high=0.2) * (valb - vala)),
                  1.0, valb]
     spl = SplEval(knots, slopea, slopeb)
     return spl
@@ -204,10 +253,11 @@ def sort_xforms(xf, method, t):
     return xf, out
 
 def align_xforms(A, B, sort='weightflip'):
-    A, B = deepcopy(A), deepcopy(B)
-
+    """
+    Aligns the xforms of the genomes A and B in place.
+    """
     # make lists of the xform dicts for sorting
-    Ax, Bx = map(dict, (A['xforms'], B['xforms']))
+    Ax, Bx = A['xforms'], B['xforms']
     Afinal = Ax.pop('final', None)
     Bfinal = Bx.pop('final', None)
 
@@ -293,9 +343,6 @@ def align_xforms(A, B, sort='weightflip'):
             B_xforms['final'] = Bfinal
 
     # now make sure we have the same variations on each side
-    A_xforms = A_xforms.copy()
-    B_xforms = B_xforms.copy()
-
     for xf in A_xforms.keys():
         Axf = A_xforms[xf]
         Bxf = B_xforms[xf]
@@ -308,7 +355,7 @@ def align_xforms(A, B, sort='weightflip'):
                 Bxf['variations'][var] = Axf['variations'][var].copy()
                 Bxf['variations'][var]['weight'] = 0.0
 
-    return map(genome._AttrDict._wrap, (A_xforms, B_xforms))
+    A['xforms'], B['xforms'] = map(genome._AttrDict._wrap, (A_xforms, B_xforms))
 
 def checkpalflip(gnm):
     if 'final' in gnm['xforms']:
@@ -325,7 +372,6 @@ def checkpalflip(gnm):
     dens = np.array([np.hypot(v['density'](0), v['density'](1))
                      for v in sansfinal])
     if np.sum(np.abs(dens * (rc - lc))) > np.sum(np.abs(dens * (rcrv - lc))):
-        print 'FLIPPING'
         palflip(gnm)
 
 def palflip(gnm):
@@ -335,14 +381,15 @@ def palflip(gnm):
     pal = genome.palette_decode(gnm['palettes'][1])
     gnm['palettes'][1] = genome.palette_encode(np.flipud(pal))
 
-def blur_palettes(gnm, blur_stdev=4):
+def blur_palettes(gnm, stdev):
     assert len(gnm['palettes']) == 2
-    gnm['palettes'].extend([create_blurred_palette(p, blur_stdev)
+    gnm['palettes'].extend([create_blurred_palette(p, stdev)
                             for p in gnm['palettes']])
     gnm['color']['palette_times'] = [0.0, '0', 0.1, '2', 0.9, '3', 1.0, '1']
 
-def create_blurred_palette(enc_palette, blur_stdev):
-    y, uvr, uvt, a = Palette.rgbtoyuvpolar(genome.palette_decode(enc_palette))
-    uvt = gaussian_filter1d(uvt, blur_stdev)
-    y, uvr, a = [gaussian_filter1d(ch, blur_stdev * 0.5) for ch in y, uvr, uvt]
+def create_blurred_palette(enc_palette, stdev):
+    pal = genome.palette_decode(enc_palette)
+    y, uvr, uvt, a = Palette.rgbtoyuvpolar(pal)
+    uvt = gaussian_filter1d(uvt, stdev)
+    y, uvr, a = [gaussian_filter1d(ch, stdev * 0.5) for ch in y, uvr, uvt]
     return genome.palette_encode(Palette.yuvpolartorgb(y, uvr, uvt, a))

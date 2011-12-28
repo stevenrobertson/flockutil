@@ -306,11 +306,8 @@ class Flockutil(object):
         rname, rpath, rrev, m = self.flock.find_edge(args.right)
         name = '%s=%s' % (lname, rname)
         l, r = [genome.Genome(json.load(open(p))) for p in (lpath, rpath)]
-
-        l['xforms'], r['xforms'] = blend.align_xforms(l, r, args.align)
-        bl = blend.blend_dicts(l, r, args.nloops, args.stagger)
-        if args.blur:
-            blend.blur_palettes(bl, args.blur)
+        bl = blend.blend_genomes(l, r, nloops=args.nloops, align=args.align,
+                stagger=args.stagger, blur=args.blur)
         return name, min(lrev, rrev)[1], genome.json_encode_genome(bl)
 
     def cmd_blend(self, args):
