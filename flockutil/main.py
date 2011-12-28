@@ -154,8 +154,8 @@ used as an alternative threshold.
             help='Number of frames to test (4)')
     p.add_argument('-p', dest='profiles', action='append',
             help='Profile to test (all), may be given multiple times')
-    p.add_argument('--diff', type=float, default=0.01,
-            help='Maximum mean SSIM deviation to accept frame (0.01)')
+    p.add_argument('--diff', type=float, default=0.02,
+            help='Maximum mean SSIM deviation to accept frame (0.02)')
     p.add_argument('--reldiff', type=float, default=1.1,
             help='Maximum relative SSIM error to accept frame (1.1)')
     return parser
