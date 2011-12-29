@@ -294,7 +294,7 @@ class Flockutil(object):
                     if os.path.islink(llink):
                         os.unlink(llink)
                     os.symlink(rev, llink)
-                    rt = ifilter(lambda r: not os.path.isfile(topath(r[0])), rt)
+                    rt = (r for r in rt if not isfile(self.topath(odir, r[0])))
                 self.render_frames(odir, gnm, prof, rt)
 
     @staticmethod
