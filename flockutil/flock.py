@@ -396,9 +396,16 @@ class Flockutil(object):
 
                     print 'Rendering frames for comparaison'
                     self.start_log(tdir, name, rev, times, prof)
-                    self.render_frames(tdir, gnm, prof, rt)
                     try:
-                        retry = dict(cmp(ldir, tdir, rt, args.diff))
+                        retry = {}
+                        if args.reldiff <= 1:
+                            # Try one frame at first for early exit
+                            self.render_frames(tdir, gnm, prof, rt[:1])
+                            retry = dict(cmp(ldir, tdir, rt[:1], args.diff))
+                            rt = rt[1:]
+                        if not retry:
+                            self.render_frames(tdir, gnm, prof, rt)
+                            retry = dict(cmp(ldir, tdir, rt, args.diff))
                     except CalledProcessError:
                         cp()
                         continue
@@ -419,7 +426,7 @@ class Flockutil(object):
                                 cp()
                                 continue
 
-                print 'Looks good, linking to old genome'
+                print 'Looks good, linking to old revid'
                 os.symlink(os.path.relpath(ldir, os.path.dirname(odir)), odir)
 
 @contextmanager
