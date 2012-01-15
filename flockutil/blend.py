@@ -272,6 +272,11 @@ def align_xforms(A, B, sort='weightflip'):
     Ax, Ax_sorted = sort_xforms(Ax, sort, 1)
     Bx, Bx_sorted = sort_xforms(Bx, sort, 0)
 
+    def pad_post(a, b):
+        if ('post' in a) ^ ('post' in b):
+            a.setdefault('post', normal_affine.copy())
+            b.setdefault('post', normal_affine.copy())
+
     # pad each category to have the same number of xforms
     for i in range(4):
 
@@ -282,10 +287,7 @@ def align_xforms(A, B, sort='weightflip'):
         if i==0 or i==1:
             num_aligned = min(len(Ax_sorted[i]), len(Bx_sorted[i]))
             for xi in range(num_aligned):
-                if 'post' in Ax_sorted[i][xi] and 'post' not in Bx_sorted[i][xi]:
-                    Bx_sorted[i][xi]['post'] = normal_affine.copy()
-                if 'post' in Bx_sorted[i][xi] and 'post' not in Ax_sorted[i][xi]:
-                    Ax_sorted[i][xi]['post'] = normal_affine.copy()
+                pad_post(Ax_sorted[i][xi], Bx_sorted[i][xi])
 
         numpad = len(Ax_sorted[i]) - len(Bx_sorted[i])
 
@@ -344,6 +346,9 @@ def align_xforms(A, B, sort='weightflip'):
         else:
             A_xforms['final'] = padfinal
             B_xforms['final'] = Bfinal
+
+    if Afinal or Bfinal:
+        pad_post(A_xforms['final'], B_xforms['final'])
 
     # now make sure we have the same variations on each side
     for xf in A_xforms.keys():
