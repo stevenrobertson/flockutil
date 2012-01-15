@@ -97,7 +97,7 @@ class Flock(object):
                 revlist.append(line)
             elif line == '':
                 rev = None
-            else:
+            elif os.path.exists(line):
                 paths.setdefault(line, (len(revlist), rev))
 
         # Identify the smallest unique prefix to use as the revid (min 6). If
