@@ -90,6 +90,12 @@ def mkparser():
             help='Specify alternate output directory.')
     p.add_argument('-f', dest='force', action='store_true',
             help='Force operation to proceed.')
+    p.add_argument('--no-unflip', dest='flip', action='store_false',
+            help="Don't automatically unflip final xforms.")
+    p.add_argument('--half', action='store_true',
+            help="Split edges into two 180-degree rotations.")
+    p.add_argument('--no-add', dest='add', action='store_false',
+            help="Don't automatically add generated edges to the git index.")
 
     p = subparsers.add_parser('render', help='Render a flock.')
     p.set_defaults(cmd='render')

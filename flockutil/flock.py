@@ -10,7 +10,7 @@ from os.path import isfile, join
 from glob import glob
 from hashlib import sha1
 from tempfile import mkdtemp
-from subprocess import check_output, CalledProcessError, STDOUT
+from subprocess import check_call, check_output, CalledProcessError, STDOUT
 from contextlib import contextmanager
 import numpy as np
 from itertools import ifilter
@@ -74,8 +74,11 @@ class Flock(object):
                           if k.startswith('edges/') and k.endswith('.json'))
 
     @staticmethod
-    def parse_status():
-        out = check_output(['git', 'status', '-z', '-uno'])
+    def parse_status(path=None, untracked=False):
+        cmd = ['git', 'status', '-z']
+        if not untracked: cmd.append('-uno')
+        if path: cmd.append(path)
+        out = check_output(cmd)
         return set(filter(None, [f for l in out for f in l[3:].split('\0')]))
 
     @staticmethod
@@ -210,7 +213,22 @@ class Flockutil(object):
         getattr(self, 'cmd_' + args.cmd)(args)
 
     def cmd_convert(self, args):
-        did = 0
+        def cvt(name, flame, arc=-360, offset=0,
+                link={'left': 'loop', 'right': 'loop'}):
+            path = os.path.join('edges/reference', name + '.json')
+            gnm = genome.convert_flame(flame, arc, offset)
+            gnm['link'] = link
+
+            if args.flip and 'final' in gnm['xforms']:
+                a = gnm['xforms']['final']['affine']
+                a['spread'] = abs(a['spread'])
+            out = genome.json_encode_genome(gnm)
+
+            with open(path, 'w') as fp:
+                fp.write(out.lstrip())
+            if args.add:
+                self._git_add(path)
+            print path
         for node in args.nodes:
             flames = genome.XMLGenomeParser.parse(node.read())
             if len(flames) > 10 and not args.force:
@@ -224,17 +242,21 @@ class Flockutil(object):
             if len(flames) == 1:
                 names = [basename]
             for name, flame in zip(names, flames):
-                path = os.path.join('edges', name + '.json')
-                if os.path.isfile(path) and not args.force:
-                    print 'Not overwriting %s (use "-f" to force).' % path
-                    continue
-                out = genome.json_encode_genome(genome.convert_flame(flame))
-                with open(path, 'w') as fp:
-                    fp.write(out.lstrip())
-                did += 1
-        if did > 0:
-            print ("Wrote %d genomes. Remember to run 'git add' and "
-                   "'git commit'." % did)
+                if args.half:
+                    cvt(name, flame, -180, 90,
+                        {'left': 'reference', 'right': 'reference'})
+                    cvt(name + '_180', flame, -180, 270,
+                        {'left': name, 'right': name})
+                else:
+                    cvt(name, flame, -360, 0)
+        self._git_check_status('edges/reference')
+
+    def _git_add(self, *paths):
+        check_call(('git', 'add') + paths)
+
+    def _git_check_status(self, path):
+        if Flock.parse_status(path, untracked=True):
+            print 'Repository is now dirty; remember to commit your changes.'
 
     def cache_managed_edge(self, name, args, rev):
         path = 'out/cache/%s.%s.json' % (name, rev)
