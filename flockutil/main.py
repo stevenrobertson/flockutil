@@ -70,7 +70,7 @@ def mkparser():
     p.add_argument('-c', help='Path of remote cuburn repository.', dest='cp',
             default='git://github.com/stevenrobertson/cuburn.git')
     p.add_argument('-f', help='Path of remote flockutil repository.',
-            dest='fp', default='git@bitbucket.org:srobertson/flockutil.git')
+            dest='fp', default='git://github.com/stevenrobertson/flockutil.git')
 
     p = subparsers.add_parser('set', help='Set default values.')
     p.set_defaults(cmd='set')
