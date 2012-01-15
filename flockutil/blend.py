@@ -21,6 +21,7 @@ def blend_genomes(left, right, nloops=2, align='weightflip', seed=None,
         stagger=False, blur=None, palflip=True):
     """
     Blend two genomes. Returns the blended genome dictionary as an _AttrDict.
+    Caller is responsible for correctly setting the 'link' dict.
 
     ``left`` and ``right`` are the respective source genomes.
 
@@ -61,6 +62,7 @@ def blend_genomes(left, right, nloops=2, align='weightflip', seed=None,
         }
     blend['info']['authors'].append('flockutil')
     blend['palettes'] = [get_palette(left, False), get_palette(right, True)]
+    blend['color']['palette_times'] = [0, "0", 1, "1"]
 
     if palflip:
         checkpalflip(blend)
@@ -107,13 +109,11 @@ def blend_splines(A, B, nloops, rng, stagger=False):
             elif path[-2:] in [('post', 'angle'), ('camera', 'rotation')]:
                 return ik(0)
             return ik(None)
-        elif path == ('color', 'palette_times'):
-            # TODO: more advanced specification of palette interpolation
-            return [0.0, "0", 1.0, "1"]
         else:
             return a
 
-    C = go(A, B)
+    nospline = ('info', 'palettes') # handled separately
+    C = dict((k, go(A[k], B[k], (k,))) for k in A if k not in nospline)
     C['time']['duration'] = '%gs' % dc if isinstance(da, basestring) else dc
     return C
 
