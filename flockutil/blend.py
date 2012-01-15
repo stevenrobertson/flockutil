@@ -79,7 +79,7 @@ def blend_splines(A, B, nloops, rng, stagger=False):
     """
     da, db = A.time.duration, B.time.duration
     if isinstance(da, basestring) ^ isinstance(db, basestring):
-        raise ValueError('Cannot blend between relative- and absolute-time')
+        raise TypeError('Cannot blend between relative- and absolute-time')
     da, db = [float(d[:-1]) if isinstance(d, basestring) else d
               for d in (da, db)]
     dc = (da + db) * nloops / 2.0
