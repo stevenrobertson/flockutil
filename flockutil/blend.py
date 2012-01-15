@@ -82,7 +82,10 @@ def blend_splines(A, B, nloops, rng, stagger=False):
         raise TypeError('Cannot blend between relative- and absolute-time')
     da, db = [float(d[:-1]) if isinstance(d, basestring) else d
               for d in (da, db)]
-    dc = (da + db) * nloops / 2.0
+    # TODO: figure out a way to determine or specify duration in a way that
+    # takes different-length sides into account
+    # dc = (da + db) * nloops / 2.0
+    dc = float(nloops)
     scalea, scaleb = dc / da, dc / db
 
     def go(a, b, path=()):
