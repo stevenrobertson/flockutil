@@ -62,11 +62,11 @@ def blend_genomes(left, right, nloops=2, align='weightflip', seed=None,
     blend['info']['authors'].append('flockutil')
     blend['palettes'] = [get_palette(left, False), get_palette(right, True)]
 
-    if blur:
-        blur_palettes(blend, blur)
-
     if palflip:
         checkpalflip(blend)
+
+    if blur:
+        blur_palettes(blend, blur)
 
     return blend
 
