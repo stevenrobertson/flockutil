@@ -6,6 +6,7 @@ import json
 import random
 import shutil
 import warnings
+import traceback
 from os.path import isfile, join
 from glob import glob
 from hashlib import sha1
@@ -351,8 +352,15 @@ class Flockutil(object):
         rname, rpath, rrev, m = self.flock.find_edge(args.right)
         name = '%s=%s' % (lname, rname)
         l, r = [genome.Genome(json.load(open(p))) for p in (lpath, rpath)]
-        bl = blend.blend_genomes(l, r, nloops=args.nloops, align=args.align,
-                stagger=args.stagger, blur=args.blur)
+        try:
+            bl = blend.blend_genomes(l, r, nloops=args.nloops,
+                align=args.align, stagger=args.stagger, blur=args.blur)
+        except:
+            print '\nWhile blending %s and %s:' % (lname, rname)
+            traceback.print_exc()
+            # TODO: propagate? nah, don't think so
+            sys.exit('Error creating %s' % name)
+        bl['link'] = {'left': lname, 'right': rname}
         return name, min(lrev, rrev)[1], genome.json_encode_genome(bl)
 
     def cmd_blend(self, args):
